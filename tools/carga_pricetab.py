@@ -13,6 +13,8 @@ import re
 import sys
 from pathlib import Path
 
+from categorizador import categorizar
+
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 
 
@@ -48,6 +50,12 @@ def parseia_linha(linha: str, numero_linha: int) -> tuple[str, str, int] | None:
     if len(codigo_barras) != 13:
         print(f"[aviso] linha {numero_linha}: código de barras com {len(codigo_barras)} caracteres (esperado 13): {codigo_barras!r}", file=sys.stderr)
 
+    # A coluna produtos.descricao é VARCHAR(40) (ver entity/ProdutoEntity.java); sem isto o
+    # INSERT falha inteiro no banco, já com linhas anteriores da mesma carga commitadas.
+    if len(descricao) > 40:
+        print(f"[aviso] linha {numero_linha}: descrição com {len(descricao)} caracteres, cortada para 40: {descricao!r}", file=sys.stderr)
+        descricao = descricao[:40].rstrip()
+
     try:
         preco_centavos = int(preco_str)
     except ValueError:
@@ -64,15 +72,30 @@ def escapa_sql(texto: str) -> str:
 def gera_sql(produtos: list[tuple[str, str, int]]) -> str:
     linhas = [
         "-- Carga gerada automaticamente por tools/carga_pricetab.py a partir do PRICETAB.TXT",
+        "-- layout_id resolvido por tools/categorizador.py (heurística por palavra-chave a partir",
+        "-- da descrição); NULL quando nenhuma palavra-chave bateu — o produto fica sem localização",
+        "-- na tela até alguém revisar o dicionário ou ajustar manualmente.",
         "",
     ]
+    sem_categoria = []
     for codigo_barras, descricao, preco_centavos in produtos:
+        layout_id = categorizar(descricao)
+        if layout_id is None:
+            sem_categoria.append((codigo_barras, descricao))
+        valor_layout_id = "NULL" if layout_id is None else str(layout_id)
         linhas.append(
-            "INSERT INTO produtos (codigo_barras, descricao, preco_centavos) VALUES "
-            f"('{escapa_sql(codigo_barras)}', '{escapa_sql(descricao)}', {preco_centavos}) "
+            "INSERT INTO produtos (codigo_barras, descricao, preco_centavos, layout_id) VALUES "
+            f"('{escapa_sql(codigo_barras)}', '{escapa_sql(descricao)}', {preco_centavos}, {valor_layout_id}) "
             "ON CONFLICT (codigo_barras) DO UPDATE SET "
-            "descricao = EXCLUDED.descricao, preco_centavos = EXCLUDED.preco_centavos;"
+            "descricao = EXCLUDED.descricao, preco_centavos = EXCLUDED.preco_centavos, "
+            "layout_id = EXCLUDED.layout_id;"
         )
+
+    if sem_categoria:
+        print(f"[aviso] {len(sem_categoria)} produto(s) sem localização (layout_id NULL):", file=sys.stderr)
+        for codigo_barras, descricao in sem_categoria:
+            print(f"  - {codigo_barras}: {descricao}", file=sys.stderr)
+
     return "\n".join(linhas) + "\n"
 
 
