@@ -39,8 +39,30 @@ NOME_SETOR = {
 SOBRESCRITAS: list[tuple[str, int]] = [
     ('DOCE DE LEITE', 5),        # senão "DOCE" isolado iria para bomboniere (29)
     ('ZERO LACTOSE', 6),         # senão "LEITE" isolado iria para laticínios 3 (26)
+    ('PAO DE QUEIJO FRESCO', 1),  # padaria (fresco); o congelado segue na linha de baixo
     ('PAO DE QUEIJO', 11),       # senão "PAES"/"QUEIJO" iriam para padaria/laticínios
     ('PAES DE QUEIJO', 11),
+    # --- Pré-lista de compras (scripts/013 e 014): produtos do PRICETAB simulado cuja palavra
+    # genérica cairia no setor errado ou em nenhum ---
+    ('BOLO DE CHOCOLATE', 1),     # senão "CHOCOLATE" iria para bomboniere
+    ('BISCOITO AGUA E SAL', 5),   # senão "AGUA" iria para bebidas
+    ('MOLHO DE TOMATE', 5),       # senão "TOMATE" iria para hortifrúti
+    ('EXTRATO DE TOMATE', 5),
+    ('OLEO DE SOJA', 5),
+    ('VINAGRE', 5),               # "VINAGRE DE ALCOOL": senão "ALCOOL" iria para limpeza
+    ('FARINHA', 25),              # "FARINHA DE MILHO": senão "MILHO" iria para mercearia 1
+    ('SAL REFINADO', 25),         # "SAL" solto não vira palavra-chave: "MARGARINA COM SAL"
+    ('PEITO DE PERU', 6),         # senão "DEFUMADO" iria para congelados
+    ('POSTA DE CACAO', 31),       # senão "CONGELADA" iria para congelados
+    ('NUGGETS', 11),              # senão "FRANGO" iria para açougue
+    ('COUVE', 9),                 # "COUVE MANTEIGA": senão iria para laticínios
+    ('AGUA SANITARIA', 23),       # senão "AGUA" iria para bebidas
+    ('AREIA SANITARIA', 10),      # senão "SANITARIA" iria para limpeza
+    ('SHAMPOO PET', 10),          # senão "SHAMPOO" iria para higiene
+    ('RACAO PARA GATOS', 20),     # senão "CARNE" (do sabor) iria para açougue
+    ('ALCOOL EM GEL', 3),         # senão "ALCOOL" iria para limpeza
+    ('INFANTIL', 28),             # shampoo/sabonete/leite em pó/lenço infantil
+    ('ASSADURAS', 28),
 ]
 
 # Palavras únicas, já em MAIÚSCULO e sem acento (ver normaliza()). A primeira que bater
@@ -52,12 +74,12 @@ PALAVRAS_CHAVE: list[tuple[str, int]] = [
     ('CHOCOLATE', 29),
     # --- Açougue (2, header) ---
     ('LINGUICA', 2), ('LINGUICAS', 2), ('ALCATRA', 2), ('BOVINO', 2), ('PORCO', 2),
-    ('FRANGO', 2), ('BOI', 2), ('CARNE', 2),
+    ('FRANGO', 2), ('BOI', 2), ('SUINO', 2), ('CARNE', 2),
     # --- Pescados (31) ---
     ('TILAPIA', 31), ('CAMARAO', 31), ('PESCADO', 31), ('PESCADOS', 31), ('LULA', 31),
     ('PEIXE', 31),
     # --- Bebidas alcoólicas 1 / 2 (12 / 22) ---
-    ('WHISKY', 12), ('UISQUE', 12), ('DESTILADO', 12), ('DESTILADOS', 12), ('VINHO', 12),
+    ('WHISKY', 12), ('UISQUE', 12), ('VODKA', 12), ('CACHACA', 12), ('DESTILADO', 12), ('DESTILADOS', 12), ('VINHO', 12),
     ('VINHOS', 12), ('CERVEJA', 22), ('CERVEJAS', 22),
     # --- Bebidas não alcoólicas 1 / 2 / 3 (4 / 14 / 24) ---
     ('ENERGETICO', 4), ('ENERGETICOS', 4), ('AGUA', 4), ('CHA', 4),
@@ -67,36 +89,45 @@ PALAVRAS_CHAVE: list[tuple[str, int]] = [
     ('ADOCANTE', 33), ('ADOANTE', 33),  # "ADOANTE": grafia sem cedilha usada no PRICETAB de teste
     ('LIGHT', 33), ('LIGTH', 33),
     # --- Congelados e resfriados 1 / 2 (11 / 21) ---
-    ('POLPA', 11), ('LASANHA', 11), ('SALCHICHA', 11), ('SALSICHA', 11),
+    ('POLPA', 11), ('LASANHA', 11), ('SALCHICHA', 11), ('SALSICHA', 11), ('PIZZA', 11),
     ('DEFUMADO', 11), ('DEFUMADA', 11), ('CONGELADO', 11), ('CONGELADA', 11),
     ('SORVETE', 21), ('SORVETES', 21),
     # --- Drogaria (3, header) ---
     ('DORALGINA', 3), ('REDOXON', 3), ('VITAMINA', 3), ('COMPRIMIDO', 3),
     ('DERMOCOSMETICO', 3), ('PROTETOR', 3), ('WHEY', 3), ('NUTRICAO', 3),
     ('MEDICAMENTO', 3), ('FARMACIA', 3), ('DROGARIA', 3),
+    ('PARACETAMOL', 3), ('DIPIRONA', 3), ('CURATIVO', 3),
     # --- Frios e laticínios 1 / 2 / 3 (6 / 16 / 26) ---
     ('REQUEIJAO', 6), ('EMBUTIDO', 6), ('LACTOSE', 6),
+    ('PRESUNTO', 6), ('SALAME', 6),
     ('MUSSARELA', 16), ('MARGARINA', 16), ('MANTEIGA', 16), ('QUEIJO', 16),
     ('IOGURTE', 26), ('LACTEO', 26), ('LEITE', 26),
     # --- Higiene e beleza 1 / 2 / 3 (7 / 17 / 27) ---
     ('PAMPERS', 7), ('FRALDA', 7), ('LISTERINE', 7), ('BUCAL', 7), ('DENTAL', 7),
-    ('SABONACEO', 7), ('SABONETE', 7), ('MAQUIAGEM', 7),
-    ('ELSEVE', 17), ('SHAMPOO', 17), ('CONDICIONADOR', 17),
-    ('HIGIENICO', 27), ('NEVE', 27),
+    ('SABONACEO', 7), ('SABONETE', 7), ('MAQUIAGEM', 7), ('ABSORVENTE', 7),
+    ('ELSEVE', 17), ('SHAMPOO', 17), ('CONDICIONADOR', 17), ('DESODORANTE', 17),
+    ('BARBEAR', 17),
+    ('HIGIENICO', 27), ('NEVE', 27), ('LENCO', 27), ('HIDRATANTE', 27),
     # --- Hortifrúti 1 / 2 (9 / 19) ---
     ('ALFACE', 9), ('ORGANICO', 9), ('VERDURA', 9), ('OVOS', 9), ('OVO', 9),
     ('CENOURA', 19), ('TOMATE', 19), ('LEGUME', 19), ('FRUTA', 19),
+    ('BANANA', 19), ('MACA', 19), ('LARANJA', 19), ('LIMAO', 19), ('MAMAO', 19),
+    ('MELANCIA', 19), ('BATATA', 19), ('CEBOLA', 19), ('ALHO', 19), ('CHUCHU', 19),
+    ('ABOBRINHA', 19),
     # --- Limpeza 1 / 2 (13 / 23) ---
     ('RAID', 13), ('GLADE', 13), ('INSETICIDA', 13), ('PURIFICADOR', 13), ('FOGAO', 13),
     ('LAVANDERIA', 23), ('AMACIANTE', 23), ('VEJA', 23), ('LIMPADOR', 23),
     ('DETERGENTE', 23), ('SABAO', 23), ('SANITARIA', 23), ('ALCOOL', 23),
+    ('DESINFETANTE', 23), ('ESPONJA', 23), ('LIXO', 23), ('PANO', 23),
     # --- Mercearia 1 / 2 / 3 (5 / 15 / 25) ---
     ('MOSTARDA', 5), ('MAIONESE', 5), ('AZEITE', 5), ('CONSERVA', 5), ('MILHO', 5),
-    ('BISCOITO', 5), ('MOLHO', 5), ('TEMPERO', 5),
-    ('CEREAL', 15), ('MATINAL', 15),
+    ('BISCOITO', 5), ('MOLHO', 5), ('TEMPERO', 5), ('KETCHUP', 5), ('SARDINHA', 5),
+    ('ATUM', 5), ('GELATINA', 5), ('PUDIM', 5),
+    ('CEREAL', 15), ('MATINAL', 15), ('CAFE', 15), ('AVEIA', 15),
     ('ESPAGUETE', 25), ('MACARRAO', 25), ('MASSA', 25), ('ARROZ', 25),
+    ('FEIJAO', 25), ('ACUCAR', 25), ('FUBA', 25),
     # --- Padaria (1, header) ---
-    ('WICKBOLD', 1), ('PAO', 1), ('PAES', 1), ('CONFEITARIA', 1),
+    ('WICKBOLD', 1), ('PAO', 1), ('PAES', 1), ('CONFEITARIA', 1), ('TORRADA', 1),
     # --- Pet Shop 1 / 2 (10 / 20) ---
     ('MORDEDOR', 10), ('COLEIRA', 10), ('COMEDOURO', 10),
     ('PEDIGREE', 20), ('RACAO', 20),
@@ -104,7 +135,7 @@ PALAVRAS_CHAVE: list[tuple[str, int]] = [
     ('AUTOMOTIVO', 8),
     ('TILIBRA', 18), ('CADERNO', 18), ('PANELA', 18), ('COZINHA', 18),
     ('HAVAIANAS', 18), ('CHINELO', 18), ('CALCADO', 18), ('LUPO', 18), ('ROUPA', 18),
-    ('LAMPADA', 18),
+    ('LAMPADA', 18), ('PILHA', 18), ('FITA', 18), ('CANETA', 18),
     # --- Infantil (28) ---
     ('BRINQUEDO', 28),
     # --- Ecologia (30) ---

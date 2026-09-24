@@ -91,6 +91,13 @@ def gera_sql(produtos: list[tuple[str, str, int]]) -> str:
             "layout_id = EXCLUDED.layout_id;"
         )
 
+    # Recalcula o item da pré-lista de todos os produtos a partir dos termos (herança
+    # textual, ver scripts/013_pre_lista.sql) — os produtos novos desta carga incluídos.
+    linhas += [
+        "",
+        "SELECT vincular_produtos_pre_lista();",
+    ]
+
     if sem_categoria:
         print(f"[aviso] {len(sem_categoria)} produto(s) sem localização (layout_id NULL):", file=sys.stderr)
         for codigo_barras, descricao in sem_categoria:
