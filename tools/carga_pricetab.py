@@ -1,4 +1,8 @@
 """
+FERRAMENTA DE EMERGÊNCIA desde o script 016: o caminho normal é o agente da loja
+(agente_pricetab/) enviando o arquivo para a API, que aplica a diferença sozinha. Esta carga não
+inativa produtos que sumiram nem atualiza o "hash aplicado" da loja.
+
 Converte um arquivo PRICETAB.TXT (formato Gertec) em um script SQL de carga,
 seguindo a mesma convenção de scripts numerados usada no projeto RAIO_X_UNIDADE
 (modelagem_dados_postgres/scripts/NNN_carga_*_local.sql).
@@ -92,12 +96,15 @@ def gera_sql(produtos: list[tuple[str, str, int]]) -> str:
             sem_categoria.append((codigo_barras, descricao))
         valor_layout_id = "NULL" if layout_id is None else str(layout_id)
         vendido_por_kg = "true" if eh_pesavel(codigo_barras) else "false"
+        # Localização corrigida à mão (layout_manual, script 016) não é sobrescrita; produto que
+        # estava inativo e voltou ao arquivo é reativado.
         linhas.append(
             "INSERT INTO produtos (codigo_barras, descricao, preco_centavos, layout_id, vendido_por_kg) VALUES "
             f"('{escapa_sql(codigo_barras)}', '{escapa_sql(descricao)}', {preco_centavos}, {valor_layout_id}, {vendido_por_kg}) "
             "ON CONFLICT (codigo_barras) DO UPDATE SET "
             "descricao = EXCLUDED.descricao, preco_centavos = EXCLUDED.preco_centavos, "
-            "layout_id = EXCLUDED.layout_id, vendido_por_kg = EXCLUDED.vendido_por_kg;"
+            "layout_id = CASE WHEN produtos.layout_manual THEN produtos.layout_id ELSE EXCLUDED.layout_id END, "
+            "vendido_por_kg = EXCLUDED.vendido_por_kg, ativo = true, atualizado_em = now();"
         )
 
     # Recalcula o item da pré-lista de todos os produtos a partir dos termos (herança
