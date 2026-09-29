@@ -47,7 +47,8 @@ def parseia_linha(linha: str, numero_linha: int) -> tuple[str, str, int] | None:
     descricao = descricao.rstrip()
     preco_str = preco_str.strip()
 
-    if len(codigo_barras) != 13:
+    # Código curto = código interno de produto pesável (ver eh_pesavel), não é erro.
+    if len(codigo_barras) != 13 and not eh_pesavel(codigo_barras):
         print(f"[aviso] linha {numero_linha}: código de barras com {len(codigo_barras)} caracteres (esperado 13): {codigo_barras!r}", file=sys.stderr)
 
     # A coluna produtos.descricao é VARCHAR(40) (ver entity/ProdutoEntity.java); sem isto o
@@ -63,6 +64,13 @@ def parseia_linha(linha: str, numero_linha: int) -> tuple[str, str, int] | None:
         return None
 
     return codigo_barras, descricao, preco_centavos
+
+
+# Produto de balança (hortifrúti, açougue, padaria): no PRICETAB vem com o código interno curto
+# (ex.: 2984), não com um EAN-13, e o preço é o do quilo. Hipótese até chegar um PRICETAB real;
+# ver scripts/015_produtos_pesaveis.sql e EtiquetaBalanca.java no back.
+def eh_pesavel(codigo_barras: str) -> bool:
+    return codigo_barras.isdigit() and len(codigo_barras) <= 6
 
 
 def escapa_sql(texto: str) -> str:
@@ -83,12 +91,13 @@ def gera_sql(produtos: list[tuple[str, str, int]]) -> str:
         if layout_id is None:
             sem_categoria.append((codigo_barras, descricao))
         valor_layout_id = "NULL" if layout_id is None else str(layout_id)
+        vendido_por_kg = "true" if eh_pesavel(codigo_barras) else "false"
         linhas.append(
-            "INSERT INTO produtos (codigo_barras, descricao, preco_centavos, layout_id) VALUES "
-            f"('{escapa_sql(codigo_barras)}', '{escapa_sql(descricao)}', {preco_centavos}, {valor_layout_id}) "
+            "INSERT INTO produtos (codigo_barras, descricao, preco_centavos, layout_id, vendido_por_kg) VALUES "
+            f"('{escapa_sql(codigo_barras)}', '{escapa_sql(descricao)}', {preco_centavos}, {valor_layout_id}, {vendido_por_kg}) "
             "ON CONFLICT (codigo_barras) DO UPDATE SET "
             "descricao = EXCLUDED.descricao, preco_centavos = EXCLUDED.preco_centavos, "
-            "layout_id = EXCLUDED.layout_id;"
+            "layout_id = EXCLUDED.layout_id, vendido_por_kg = EXCLUDED.vendido_por_kg;"
         )
 
     # Recalcula o item da pré-lista de todos os produtos a partir dos termos (herança

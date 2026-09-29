@@ -110,6 +110,7 @@ PALAVRAS_CHAVE: list[tuple[str, int]] = [
     ('HIGIENICO', 27), ('NEVE', 27), ('LENCO', 27), ('HIDRATANTE', 27),
     # --- Hortifrúti 1 / 2 (9 / 19) ---
     ('ALFACE', 9), ('ORGANICO', 9), ('VERDURA', 9), ('OVOS', 9), ('OVO', 9),
+    ('REPOLHO', 9),
     ('CENOURA', 19), ('TOMATE', 19), ('LEGUME', 19), ('FRUTA', 19),
     ('BANANA', 19), ('MACA', 19), ('LARANJA', 19), ('LIMAO', 19), ('MAMAO', 19),
     ('MELANCIA', 19), ('BATATA', 19), ('CEBOLA', 19), ('ALHO', 19), ('CHUCHU', 19),

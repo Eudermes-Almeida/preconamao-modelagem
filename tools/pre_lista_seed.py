@@ -213,6 +213,13 @@ PRE_LISTA: list[tuple[str, list[tuple[str, list[str]]]]] = [
     ]),
 ]
 
+# Itens criados depois da planilha, com id fixo a partir de 167: acrescentá-los no meio de
+# PRE_LISTA mudaria o id de todos os itens seguintes (e a pré-lista salva no aparelho do
+# cliente é por id). (id, categoria, item, [termos])
+ITENS_ADICIONAIS: list[tuple[int, str, str, list[str]]] = [
+    (167, 'Hortifrúti (Frutas, Verduras e Legumes)', 'Repolho', ['REPOLHO']),  # 015_produtos_pesaveis.sql
+]
+
 
 def _sql(texto: str) -> str:
     return "'" + texto.replace("'", "''") + "'"
@@ -234,6 +241,17 @@ def gera_sql() -> str:
                     raise ValueError(f'termo repetido: {termo}')
                 vistos.add(termo)
                 termos.append(f"({item_id}, {_sql(termo)})")
+    nomes_categorias = [categoria for categoria, _ in PRE_LISTA]
+    for item_id, categoria, item, termos_item in ITENS_ADICIONAIS:
+        cat_id = nomes_categorias.index(categoria) + 1
+        ordem = len(PRE_LISTA[cat_id - 1][1]) + 1 + sum(
+            1 for outro in ITENS_ADICIONAIS if outro[1] == categoria and outro[0] < item_id)
+        itens.append(f"({item_id}, {cat_id}, {_sql(item)}, {ordem})")
+        for termo in termos_item:
+            if termo in vistos:
+                raise ValueError(f'termo repetido: {termo}')
+            vistos.add(termo)
+            termos.append(f"({item_id}, {_sql(termo)})")
     return (
         "INSERT INTO pre_lista_categoria (id, nome, ordem) VALUES\n  " + ",\n  ".join(categorias) + ";\n\n"
         "INSERT INTO pre_lista_item (id, categoria_id, nome, ordem) VALUES\n  " + ",\n  ".join(itens) + ";\n\n"
