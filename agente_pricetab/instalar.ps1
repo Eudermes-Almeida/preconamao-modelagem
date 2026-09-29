@@ -21,9 +21,11 @@ $nomeTarefa = 'SimplificaCompras-AgentePricetab'
 $caminhoConfig = Join-Path $PSScriptRoot 'config.json'
 $caminhoModelo = Join-Path $PSScriptRoot 'config.exemplo.json'
 
-function Perguntar([string]$texto, [string]$sugestao) {
+function Perguntar([string]$texto, [string]$sugestao, [switch]$Segredo) {
     if ($SemPerguntas) { return $sugestao }
-    $resposta = Read-Host "$texto [$sugestao]"
+    # A chave nunca aparece inteira na tela (a janela pode ser fotografada ou compartilhada).
+    $exibida = if ($Segredo -and $sugestao -and $sugestao.Length -gt 12) { $sugestao.Substring(0, 8) + '...' + $sugestao.Substring($sugestao.Length - 4) } else { $sugestao }
+    $resposta = Read-Host "$texto [$exibida]"
     if ([string]::IsNullOrWhiteSpace($resposta)) { return $sugestao }
     return $resposta.Trim()
 }
@@ -35,7 +37,7 @@ Write-Host ''
 $base = if (Test-Path $caminhoConfig) { Get-Content $caminhoConfig -Raw -Encoding UTF8 | ConvertFrom-Json } else { Get-Content $caminhoModelo -Raw -Encoding UTF8 | ConvertFrom-Json }
 $config = [ordered]@{
     url                   = if ($Url) { $Url } else { Perguntar 'Endereço da API' $base.url }
-    chave                 = if ($Chave) { $Chave } else { Perguntar 'Chave da loja (fornecida pela Simplifica Compras)' $base.chave }
+    chave                 = if ($Chave) { $Chave } else { Perguntar 'Chave da loja (fornecida pela Simplifica Compras)' $base.chave -Segredo }
     pasta                 = if ($Pasta) { $Pasta } else { Perguntar 'Pasta onde fica o PRICETAB' $base.pasta }
     arquivo               = if ($Arquivo) { $Arquivo } else { Perguntar 'Nome do arquivo' $base.arquivo }
     intervaloSinalMinutos = if ($base.intervaloSinalMinutos) { [int]$base.intervaloSinalMinutos } else { 5 }
