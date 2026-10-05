@@ -146,7 +146,8 @@ INSERT INTO abreviacao (termo, expansao) VALUES
   ('ORIG', 'ORIGINAL'),
   ('LIQ', 'LIQUIDO'),
   ('TINT', 'TINTURA'),
-  ('SAND', 'SANDALIA'),
+  ('SAND', 'SANDUICHE'),
+  ('SAND HAV', 'SANDALIA HAVAIANAS'),
   ('HAV', 'HAVAIANAS'),
   ('SCH', 'SACHE'),
   ('LAR', 'LARANJA'),
@@ -337,7 +338,17 @@ INSERT INTO abreviacao (termo, expansao) VALUES
   ('FORT', 'FORTE'),
   ('FT', 'FOLHA TRIPLA'),
   ('FS', 'FOLHA SIMPLES'),
-  ('MARAC', 'MARACUJA');
+  ('MARAC', 'MARACUJA'),
+  ('SABAO PO', 'SABAO EM PO'),
+  ('SABAO BR', 'SABAO EM BARRA'),
+  ('MOLHO TOM', 'MOLHO DE TOMATE'),
+  ('^EXT PROPOLIS', 'EXTRATO DE PROPOLIS'),
+  ('CHOCOTT', 'CHOCOTTONE'),
+  ('ROSQ', 'ROSQUINHA'),
+  ('RAPAD', 'RAPADURA'),
+  ('BICARB', 'BICARBONATO'),
+  ('REPEL', 'REPELENTE'),
+  ('LACT', 'LACTOSE');
 
 -- Expande as abreviações de uma descrição, palavra por palavra (palavra = trecho entre espaços).
 -- "C/" e "S/" grudados na palavra seguinte ("C/GAS", "S/AC") viram COM / SEM antes. Em cada
