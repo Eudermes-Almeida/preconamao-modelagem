@@ -1,0 +1,8 @@
+# Arquivos de PRICETAB já conhecidos (pasta PRICETABS/ na raiz) e o dicionário do catálogo que
+# cada um usa. Usado por tools/analisar_loja_nova.py para dizer QUAL dicionário reaproveitar
+# quando uma loja nova tem o mesmo padrão de uma conhecida.
+arquivo;dicionario;loja
+PRICE2.TXT;price2;Alfa Centro (lab 1)
+PRICETABS.TXT;price2;Alfa Bairro (lab 2)
+PRICETABF.TXT;beta;Beta Hiper (lab 3)
+PRICETABP.TXT;gama;Gama (lab 4)
