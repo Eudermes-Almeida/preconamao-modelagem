@@ -175,7 +175,7 @@ INSERT INTO abreviacao (dicionario_id, termo, expansao, layout_id, condicao) VAL
   ((SELECT id FROM dicionario WHERE nome = 'Comum'), 'BICARB', 'BICARBONATO', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'Comum'), 'REPEL', 'REPELENTE', NULL, NULL);
 
--- PRICE2 (CATALOGO): 141 regras
+-- PRICE2 (CATALOGO): 147 regras
 INSERT INTO dicionario (nome, camada) VALUES ('PRICE2', 'CATALOGO') ON CONFLICT (nome) DO NOTHING;
 DELETE FROM abreviacao WHERE dicionario_id = (SELECT id FROM dicionario WHERE nome = 'PRICE2');
 INSERT INTO abreviacao (dicionario_id, termo, expansao, layout_id, condicao) VALUES
@@ -227,7 +227,8 @@ INSERT INTO abreviacao (dicionario_id, termo, expansao, layout_id, condicao) VAL
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'S', 'SEM', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'CR', 'CREME', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'COND', 'CONDICIONADOR', NULL, NULL),
-  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'SAB', 'SABONETE', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), '^SAB', 'SABONETE', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'SAB', 'SABOR', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'ESC', 'ESCURO', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'CAST', 'CASTANHA', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'MAC', 'MACIA', NULL, NULL),
@@ -319,7 +320,12 @@ INSERT INTO abreviacao (dicionario_id, termo, expansao, layout_id, condicao) VAL
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'FT', 'FOLHA TRIPLA', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'FS', 'FOLHA SIMPLES', NULL, NULL),
   ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), '^EXT PROPOLIS', 'EXTRATO DE PROPOLIS', NULL, NULL),
-  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'LACT', 'LACTOSE', NULL, NULL);
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'LACT', 'LACTOSE', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'BARB', 'BARBECUE', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'AP BARB', 'APARELHO BARBEAR', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'ESP BARB', 'ESPUMA DE BARBEAR', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), 'LAMINA BARB', 'LAMINA DE BARBEAR', NULL, NULL),
+  ((SELECT id FROM dicionario WHERE nome = 'PRICE2'), '^MIST LACTEA COND', 'MISTURA LACTEA CONDENSADA', NULL, NULL);
 
 -- Beta (CATALOGO): 30 regras
 INSERT INTO dicionario (nome, camada) VALUES ('Beta', 'CATALOGO') ON CONFLICT (nome) DO NOTHING;

@@ -45,7 +45,7 @@ DELETE FROM categorizador_regra WHERE tipo = 'FRASE' AND termo IN
     ('BATATA PALHA', 'BATATA CROQUES', 'BATATA PRINGLES', 'BATATA CONGELAD', 'BATATA PALITO', 'BATATA ONDULADA',
      'BATATA BEM BRASIL', 'BATATA MCCAIN', 'AMACIANTE CARNE', 'AMACIANTE DE CARNE', 'BEBIDA LACTEA', 'DOCE LEITE',
      'PRE TREINO', 'SALGADINHO COXINHA', 'SALGADINHO ESFIRRA', 'SALGADINHO FOLHADO');
-DELETE FROM categorizador_regra WHERE tipo = 'PALAVRA' AND termo = 'DOCE';
+DELETE FROM categorizador_regra WHERE tipo = 'PALAVRA' AND termo IN ('DOCE', 'POTE', 'GARRAFA', 'COQUETEL', 'HAMBURGUER');
 
 INSERT INTO categorizador_regra (tipo, ordem, termo, layout_id)
 SELECT v.tipo, (SELECT coalesce(max(ordem), 0) FROM categorizador_regra) + v.n, v.termo, v.layout_id
@@ -99,14 +99,48 @@ SELECT v.tipo, (SELECT coalesce(max(ordem), 0) FROM categorizador_regra) + v.n, 
     (44, 'PALAVRA', 'JOGO',                8),
     (45, 'PALAVRA', 'CONJUNTO',            8),
     (46, 'PALAVRA', 'COPO',                8),
-    (47, 'PALAVRA', 'GARRAFA',             8),
+    (47, 'FRASE',   '^GARRAFA ',           8),
     (48, 'PALAVRA', 'PORTA',               8),
-    (49, 'PALAVRA', 'POTE',                8),
+    (49, 'FRASE',   '^POTE ',              8),
     (50, 'PALAVRA', 'PRATO',               8),
     (51, 'PALAVRA', 'DECORADOR',           8),
     (52, 'PALAVRA', 'ESPATULA',            8),
     (53, 'PALAVRA', 'TOPO',                8),
-    (54, 'FRASE',   '^DOCE ',             29)
+    (54, 'FRASE',   '^DOCE ',             29),
+    -- revisão de 07/10: POTE e GARRAFA só como 1ª palavra ("TODDY POTE 380G" não é Bazar); as
+    -- 16 posições que traziam o utensílio no meio ganham a própria 1ª palavra
+    (61, 'PALAVRA', 'ACHOCOLATADO',        5),
+    (62, 'PALAVRA', 'AZEITONA',            5),
+    (63, 'FRASE',   '^AMEIXA SECA',        5),
+    (64, 'PALAVRA', 'GOIABADA',            5),
+    (65, 'FRASE',   '^CREME PISTACHE',     5),
+    (66, 'PALAVRA', 'SODA',               13),
+    (67, 'PALAVRA', 'HASTE',               7),
+    (68, 'FRASE',   '^COQUETEL ',         12),
+    (83, 'FRASE',   '^COQUETEL BALA',     29),
+    (84, 'FRASE',   '^BEBIDA COQUETEL',   12),
+    (85, 'PALAVRA', 'CIABATTA',            1),
+    (86, 'PALAVRA', 'FAQUEIRO',            8),
+    (87, 'PALAVRA', 'CJ',                  8),
+    (88, 'PALAVRA', 'TAMPA',               8),
+    (89, 'FRASE',   '^HAMBURGUER ',       11),
+    (91, 'FRASE',   '^BIFE HAMBURGUER',   11),
+    (90, 'FRASE',   '^OLEO COCO',          5),
+    (69, 'FRASE',   '^FLOR NATURAL',      30),
+    (70, 'PALAVRA', 'CJONJ',               8),
+    (71, 'PALAVRA', 'ADAPT',               8),
+    (72, 'PALAVRA', 'ABRIDOR',             8),
+    (73, 'PALAVRA', 'ABRID',               8),
+    (74, 'PALAVRA', 'SACOLA',              8),
+    -- revisão de 07/10: ajustes pedidos
+    (75, 'FRASE',   '^BARRA FRUTA',        5),
+    (76, 'FRASE',   '^PUDIM LEITE BAT',    6),
+    (77, 'PALAVRA', 'SALSICHA',            6),
+    (78, 'FRASE',   '^SALSICHA ANGLO',     5),
+    (79, 'FRASE',   '^SALSICHA CARIOCA',   5),
+    (80, 'FRASE',   '^SALGADINHO EMPADA',  1),
+    (81, 'FRASE',   '^SALGADINHO DIVINISSIMO', 11),
+    (82, 'FRASE',   '^SALGADINHO DIVERSOS', 11)
   ) v(n, tipo, termo, layout_id)
 ON CONFLICT (tipo, termo) DO UPDATE SET layout_id = EXCLUDED.layout_id;
 
