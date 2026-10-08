@@ -33,6 +33,8 @@
 //   POST /lab/mudar-preco    {"codigoBarras", "preco", "semData"}  preço de UM produto (roteiro manual);
 //                            semData: true = NÃO atualiza a DataHoraManutencao (só a completa pega)
 //   POST /lab/desativar      {"quantidade": 3}       N produtos com Ativo = false (atualiza a data)
+//   POST /lab/oferta         {"codigoBarras","preco","inicio","fim","semData"}  oferta (inclusive futura)
+//   POST /lab/derrubar-precos {"quantidade": 300, "fator": 0.3}  queda em massa (teste da trava)
 //   POST /lab/remover-auxiliar {"codigoBarras"}      tira o 1º código auxiliar desse produto
 //   POST /lab/excluir        {"quantidade": 5}       some com N produtos (vão para "excluidos")
 //   POST /lab/token-curto    {"segundos": 2}         tokens novos vencem rápido (teste do token vencido)
@@ -152,6 +154,40 @@ const servidor = http.createServer(async (req, res) => {
           p.DataHoraManutencao = agoraManutencao();
         }
         return responder(res, 200, { codigo: p.CodigoBarras, descricao: p.Descricao, novoPreco: p.PrecoPDV, dataAtualizada: !corpo.semData });
+      }
+      case '/lab/oferta': {
+        // Oferta num produto: {"codigoBarras","preco","inicio":"dd-MM-yyyy","fim":"dd-MM-yyyy","semData"}.
+        // Como na RPInfo: Oferta "S", Preco = PrecoPDV = preço da oferta, PrecoNormal = "de".
+        // (Oferta futura: o caixa ainda cobra o normal; aqui o PrecoPDV só muda quando a oferta começa,
+        // e isso é simulado chamando de novo com inicio = hoje e "semData": true.)
+        const p = dados.produtos.find((x) => x.CodigoBarras === (corpo && corpo.codigoBarras));
+        if (!p || !(Number(corpo.preco) > 0) || !corpo.inicio || !corpo.fim) {
+          return responder(res, 404, { erro: 'informe codigoBarras, preco, inicio e fim (dd-MM-yyyy)' });
+        }
+        if (p.Oferta !== 'S') {
+          p.PrecoNormal = p.PrecoPDV;
+        }
+        const comecou = lerDataHora(corpo.inicio) <= new Date();
+        p.Oferta = 'S';
+        p.DtIniOferta = corpo.inicio;
+        p.DataOferta = corpo.fim;
+        if (comecou) {
+          p.Preco = p.PrecoPDV = p.PrecoEtiqueta = Number(corpo.preco);
+        }
+        if (!corpo.semData) {
+          p.DataHoraManutencao = agoraManutencao();
+        }
+        return responder(res, 200, { codigo: p.CodigoBarras, descricao: p.Descricao, oferta: corpo, vigente: comecou, precoCaixa: p.PrecoPDV });
+      }
+      case '/lab/derrubar-precos': {
+        // Queda em massa (teste da trava): {"quantidade": 300, "fator": 0.3} -> PrecoPDV x fator.
+        const fator = (corpo && corpo.fator) || 0.3;
+        const alvo = sorteia(dados.produtos.filter((p) => p.Ativo && p.Oferta !== 'S'), (corpo && corpo.quantidade) || 300);
+        for (const p of alvo) {
+          p.Preco = p.PrecoPDV = p.PrecoEtiqueta = Math.max(0.01, Math.round(p.PrecoPDV * fator * 100) / 100);
+          p.DataHoraManutencao = agoraManutencao();
+        }
+        return responder(res, 200, { derrubados: alvo.length, fator });
       }
       case '/lab/desativar': {
         const alvo = sorteia(dados.produtos.filter((p) => p.Ativo), (corpo && corpo.quantidade) || 3);

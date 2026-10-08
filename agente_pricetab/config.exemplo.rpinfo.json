@@ -1,0 +1,17 @@
+{
+  "modo": "rpinfo",
+  "url": "https://preconamao-backend.onrender.com",
+  "chave": "COLE AQUI A CHAVE DA LOJA (depois rode: proteger.ps1 -Campo chave)",
+  "intervaloSinalMinutos": 1,
+  "auditoria": true,
+  "rpinfo": {
+    "url": "http://ENDERECO-INTERNO-DA-API-RPINFO:9000",
+    "usuario": "USUARIO SÓ DE LEITURA DA API",
+    "senha": "SENHA DA API (depois rode: proteger.ps1 -Campo senha)",
+    "cnpj": "CNPJ DA UNIDADE (LOJA) NA RPINFO",
+    "tamanhoPagina": 100,
+    "intervaloMinutos": 5,
+    "folgaMinutos": 10,
+    "horarioCompleta": "12:00"
+  }
+}
