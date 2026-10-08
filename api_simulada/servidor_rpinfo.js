@@ -15,7 +15,7 @@
 // Sem dependências (só Node). Uso: node servidor_rpinfo.js   (porta 18091; dados em
 // dados_rpinfo.json, gerados por gerar_dados_rpinfo.py; usuário e senha em credenciais.json).
 // No laboratório roda no container "api-rpinfo" (sobe sozinho com o Docker):
-//   docker run -d --name api-rpinfo --restart unless-stopped -p 18091:18091
+//   docker run -d --name api-rpinfo --restart unless-stopped -e TZ=America/Sao_Paulo -p 18091:18091
 //     -v <esta pasta>:/app -w /app node:20-alpine node servidor_rpinfo.js
 // Depois de mudar este arquivo ou os dados: docker restart api-rpinfo.
 //
@@ -30,7 +30,10 @@
 // Botões de laboratório (para provocar situações sem editar arquivos):
 //   POST /lab/fora-do-ar     {"ativo": true|false}   API responde 503 em tudo
 //   POST /lab/mudar-precos   {"quantidade": 20}      +5% no preço de N produtos ativos
-//   POST /lab/mudar-preco    {"codigoBarras", "preco"}  preço de UM produto (roteiro manual)
+//   POST /lab/mudar-preco    {"codigoBarras", "preco", "semData"}  preço de UM produto (roteiro manual);
+//                            semData: true = NÃO atualiza a DataHoraManutencao (só a completa pega)
+//   POST /lab/desativar      {"quantidade": 3}       N produtos com Ativo = false (atualiza a data)
+//   POST /lab/remover-auxiliar {"codigoBarras"}      tira o 1º código auxiliar desse produto
 //   POST /lab/excluir        {"quantidade": 5}       some com N produtos (vão para "excluidos")
 //   POST /lab/token-curto    {"segundos": 2}         tokens novos vencem rápido (teste do token vencido)
 //   POST /lab/lento          {"ms": 3000}            atraso em cada resposta (teste de tempo)
@@ -145,8 +148,27 @@ const servidor = http.createServer(async (req, res) => {
           return responder(res, 404, { erro: 'informe codigoBarras de um produto e preco > 0' });
         }
         p.Preco = p.PrecoPDV = p.PrecoEtiqueta = Number(corpo.preco);
+        if (!corpo.semData) {
+          p.DataHoraManutencao = agoraManutencao();
+        }
+        return responder(res, 200, { codigo: p.CodigoBarras, descricao: p.Descricao, novoPreco: p.PrecoPDV, dataAtualizada: !corpo.semData });
+      }
+      case '/lab/desativar': {
+        const alvo = sorteia(dados.produtos.filter((p) => p.Ativo), (corpo && corpo.quantidade) || 3);
+        for (const p of alvo) {
+          p.Ativo = false;
+          p.DataHoraManutencao = agoraManutencao();
+        }
+        return responder(res, 200, { desativados: alvo.map((p) => p.CodigoBarras) });
+      }
+      case '/lab/remover-auxiliar': {
+        const p = dados.produtos.find((x) => x.CodigoBarras === (corpo && corpo.codigoBarras));
+        if (!p || !p.codBarrasAlterados.length) {
+          return responder(res, 404, { erro: 'informe codigoBarras de um produto com código auxiliar' });
+        }
+        const removido = p.codBarrasAlterados.shift();
         p.DataHoraManutencao = agoraManutencao();
-        return responder(res, 200, { codigo: p.CodigoBarras, descricao: p.Descricao, novoPreco: p.PrecoPDV });
+        return responder(res, 200, { produto: p.CodigoBarras, auxiliarRemovido: removido.codigoBarras });
       }
       case '/lab/excluir': {
         const alvo = new Set(sorteia(dados.produtos, (corpo && corpo.quantidade) || 5));
