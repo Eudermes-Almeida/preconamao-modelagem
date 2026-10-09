@@ -3,7 +3,9 @@
 # Um agente só, com MODOS (config.json, campo "modo"):
 #   "arquivo" (padrão) - vigia o PRICETAB.TXT e envia sempre que ele muda;
 #   "rpinfo"           - consulta a API da RPInfo ("RP Services") NA REDE INTERNA da loja e envia
-#                        pacotes JSON só com os campos de produto e preço.
+#                        pacotes JSON só com os campos de produto e preço;
+#   "banco"            - lê, por ODBC, a VIEW padrão vw_simplifica_precos no banco do ERP DENTRO da
+#                        loja (usuário só com SELECT nela) e envia pacotes JSON (POST /cargas/banco).
 #
 # Segurança (vale para os dois modos):
 # - Só faz conexões de SAÍDA. Não abre porta, não aceita conexões, não executa nada que venha de
@@ -18,12 +20,13 @@
 #
 # Uso: agente.ps1 [-Config caminho] [-TestarConexao]
 #   -TestarConexao (modo rpinfo): testa login, unidade, departamentos e 1ª página da API e sai.
+#   -TestarConexao (modo banco): lê a VIEW, confere a coluna data_alteracao e o servidor, e sai.
 
 param([string]$Config = (Join-Path $PSScriptRoot 'config.json'), [switch]$TestarConexao)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$versaoAgente = '2.0'
+$versaoAgente = '2.1'
 
 $cfg = Get-Content $Config -Raw -Encoding UTF8 | ConvertFrom-Json
 $url = $cfg.url.TrimEnd('/')
@@ -599,9 +602,267 @@ function Executar-ModoRpinfo {
 }
 
 # ----------------------------------------------------------------------------------------------
+# Modo "banco": lê a VIEW padrão (vw_simplifica_precos) no banco do ERP DENTRO da loja, por ODBC
+# (driver oficial do fabricante instalado pela TI: MySQL, SQL Server, PostgreSQL, Firebird,
+# Oracle...), com um usuário que só tem SELECT na VIEW. Envia pacotes para POST /cargas/banco.
+# Contrato da VIEW: laboratorio/conector_banco/CONTRATO_VIEW.md.
+# ----------------------------------------------------------------------------------------------
+$colunasView = @('codigo_barras', 'descricao', 'preco', 'preco_promocional', 'promocao_ate', 'unidade', 'secao',
+    'codigo_interno', 'ativo')
+
+function Executar-ModoBanco {
+    $b = $cfg.banco
+    $conexao = [string]$b.conexao
+    $usuario = [string]$b.usuario
+    $senha = Ler-Segredo $(if ($b.senhaProtegida) { $b.senhaProtegida } else { $b.senha })
+    if (-not $b.senhaProtegida) { Registrar 'Aviso: a senha do banco está em texto aberto no config.json. Proteja com proteger.ps1.' }
+    $view = if ($b.view) { [string]$b.view } else { 'vw_simplifica_precos' }
+    if ($view -notmatch '^[A-Za-z_][A-Za-z0-9_.]*$') { throw "Nome de VIEW inválido no config.json: '$view'." }
+    $usaIncremental = -not ($b.incremental -eq $false)   # VIEW tem a coluna data_alteracao
+    $intervaloMin = if ($b.intervaloMinutos) { [double]$b.intervaloMinutos } else { 5 }
+    $folgaMin = if ($b.folgaMinutos) { [double]$b.folgaMinutos } else { 10 }
+    $horarioCompleta = if ($b.horarioCompleta) { [string]$b.horarioCompleta } else { '12:00' }
+    $auditoria = -not ($cfg.auditoria -eq $false)
+    $pastaFila = Join-Path $PSScriptRoot 'fila'
+    $pastaAuditoria = Join-Path $PSScriptRoot 'auditoria'
+    New-Item -ItemType Directory -Force $pastaFila, $pastaAuditoria | Out-Null
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+
+    $foto = @{}        # codigo_barras -> JSON da linha como vai no pacote
+    $internoDe = @{}   # codigo_barras -> codigo_interno (para avisar o servidor de linhas que sumiram)
+
+    function Valor($v) {
+        if ($v -is [DBNull] -or $null -eq $v) { return $null }
+        if ($v -is [datetime]) { return $v.ToString('yyyy-MM-dd HH:mm:ss') }
+        if ($v -is [decimal] -or $v -is [double] -or $v -is [single]) { return $v.ToString($inv) }
+        return ([string]$v).Trim()
+    }
+
+    # Lê a VIEW (toda, ou só o que mudou desde $desde). Devolve codigo_barras -> linha (ordered).
+    function Ler-View($desde) {
+        $cs = $conexao.TrimEnd(';') + ";Uid=$usuario;Pwd=$senha;"
+        $con = New-Object System.Data.Odbc.OdbcConnection $cs
+        $linhas = @{}
+        try {
+            $con.Open()
+            $cmd = $con.CreateCommand()
+            $cmd.CommandTimeout = 300
+            $sql = "SELECT $($colunasView -join ', ') FROM $view"
+            if ($null -ne $desde) {
+                $sql += ' WHERE data_alteracao >= ?'
+                $p = New-Object System.Data.Odbc.OdbcParameter('desde', [System.Data.Odbc.OdbcType]::DateTime)
+                $p.Value = $desde
+                $null = $cmd.Parameters.Add($p)
+            }
+            $cmd.CommandText = $sql
+            $leitor = $cmd.ExecuteReader()
+            while ($leitor.Read()) {
+                $l = [ordered]@{}
+                for ($i = 0; $i -lt $colunasView.Count; $i++) { $l[$colunasView[$i]] = Valor ($leitor.GetValue($i)) }
+                if ($l['codigo_barras']) { $linhas[$l['codigo_barras']] = $l }
+            }
+            $leitor.Close()
+        } finally { $con.Close() }
+        return $linhas
+    }
+
+    function Json-Linha($l) { return ($l | ConvertTo-Json -Compress) }
+
+    function Hash-Foto {
+        $partes = foreach ($k in ($foto.Keys | Sort-Object)) { "$k=$(Hash-Texto $foto[$k])" }
+        return Hash-Texto (($partes) -join "`n")
+    }
+
+    function Enfileirar([string]$tipo, [string[]]$linhasJson, [string[]]$excluidos, [string]$hashFoto) {
+        $agora = Get-Date
+        $exc = '[' + ((@($excluidos) | Where-Object { $_ } | Sort-Object -Unique | ForEach-Object { ConvertTo-Json ([string]$_) -Compress }) -join ',') + ']'
+        $texto = '{"tipo":"' + $tipo + '","geradoEm":"' + $agora.ToString('yyyy-MM-ddTHH:mm:sszzz') + '","versaoAgente":"' + $versaoAgente +
+            '","hashFoto":"' + $hashFoto + '","linhas":[' + ($linhasJson -join ',') + '],"excluidos":' + $exc + '}'
+        $nome = '{0:yyyyMMdd-HHmmss-fff}-{1}' -f $agora, $tipo
+        if ($auditoria) { [IO.File]::WriteAllText((Join-Path $pastaAuditoria "$nome.json"), $texto, (New-Object Text.UTF8Encoding $false)) }
+        $memoria = New-Object IO.MemoryStream
+        $gz = New-Object IO.Compression.GZipStream($memoria, [IO.Compression.CompressionMode]::Compress)
+        $bytes = [Text.Encoding]::UTF8.GetBytes($texto)
+        $gz.Write($bytes, 0, $bytes.Length); $gz.Close()
+        [IO.File]::WriteAllBytes((Join-Path $pastaFila "$nome.json.gz"), $memoria.ToArray())
+        Registrar ("Pacote {0} na fila: {1} linha(s), {2} produto(s) excluído(s), {3:N0} bytes compactado (foto {4})." -f
+            $tipo, $linhasJson.Count, @($excluidos).Count, $memoria.ToArray().Length, $hashFoto.Substring(0, 12))
+    }
+
+    function Enviar-Fila {
+        foreach ($f in (Get-ChildItem $pastaFila -Filter '*.json.gz' | Sort-Object Name)) {
+            $bytes = [IO.File]::ReadAllBytes($f.FullName)
+            try {
+                $resposta = Invoke-WebRequest -Uri "$url/cargas/banco" -Method Post -Body $bytes -ContentType 'application/gzip' `
+                    -Headers $cabecalhos -UseBasicParsing -TimeoutSec 120
+                $json = (Ler-Corpo $resposta) | ConvertFrom-Json
+                Registrar "Pacote $($f.Name) enviado: $($json.situacao) - $($json.mensagem)"
+                Remove-Item $f.FullName -Force
+            } catch {
+                $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+                if ($status -eq 400) {
+                    Move-Item $f.FullName (Join-Path $pastaFila ($f.Name + '.recusado')) -Force
+                    Registrar "Pacote $($f.Name) RECUSADO pelo servidor: $(Descrever-Erro $_). Guardado como .recusado."
+                    continue
+                }
+                throw
+            }
+        }
+    }
+
+    # Completa: a VIEW inteira vira a foto.
+    function Coleta-Completa {
+        $inicio = Get-Date
+        $lidas = Ler-View $null
+        $foto.Clear(); $internoDe.Clear()
+        foreach ($k in $lidas.Keys) { $foto[$k] = Json-Linha $lidas[$k]; $internoDe[$k] = $lidas[$k]['codigo_interno'] }
+        Registrar ("Leitura COMPLETA da VIEW {0}: {1} linha(s) em {2:N1} s." -f $view, $foto.Count, ((Get-Date) - $inicio).TotalSeconds)
+        return @{ hash = (Hash-Foto); inicio = $inicio }
+    }
+
+    # Incremental: só o que mudou (data_alteracao) ou, sem essa coluna, a VIEW inteira comparada com a
+    # foto (aí também acha as linhas que sumiram). Devolve linhas mudadas e internos a avisar.
+    function Coleta-Incremental([datetime]$desde) {
+        $inicio = Get-Date
+        $mudados = New-Object System.Collections.Generic.List[string]
+        $excluidos = New-Object System.Collections.Generic.List[string]
+        $lidas = if ($usaIncremental) { Ler-View $desde } else { Ler-View $null }
+        foreach ($k in $lidas.Keys) {
+            $j = Json-Linha $lidas[$k]
+            if ($foto[$k] -ne $j) { $foto[$k] = $j; $internoDe[$k] = $lidas[$k]['codigo_interno']; $mudados.Add($k) }
+        }
+        # O servidor tira da loja os códigos de um produto (codigo_interno) que não vierem no pacote
+        # PARCIAL: manda TODOS os códigos de barras de cada produto que mudou, não só a linha mudada.
+        $internosMudados = @{}
+        foreach ($k in $mudados) { if ($internoDe[$k]) { $internosMudados[[string]$internoDe[$k]] = $true } }
+        if ($internosMudados.Count) {
+            foreach ($k in @($foto.Keys)) {
+                if (-not $mudados.Contains($k) -and $internoDe[$k] -and $internosMudados.ContainsKey([string]$internoDe[$k])) { $mudados.Add($k) }
+            }
+        }
+        if (-not $usaIncremental) {
+            foreach ($k in @($foto.Keys)) {
+                if (-not $lidas.ContainsKey($k)) {
+                    if ($internoDe[$k]) { $excluidos.Add([string]$internoDe[$k]) }
+                    $foto.Remove($k); $internoDe.Remove($k)
+                }
+            }
+        }
+        Registrar ("Leitura incremental{0}: {1} linha(s) lida(s), {2} mudada(s), {3} removida(s) em {4:N1} s." -f
+            $(if ($usaIncremental) { " desde {0:dd/MM HH:mm}" -f $desde } else { ' (VIEW inteira, sem data_alteracao)' }),
+            $lidas.Count, $mudados.Count, $excluidos.Count, ((Get-Date) - $inicio).TotalSeconds)
+        return @{ mudados = $mudados; excluidos = $excluidos; inicio = $inicio }
+    }
+
+    if ($TestarConexao) {
+        Registrar "Teste de conexão com o banco (VIEW $view)..."
+        try {
+            $lidas = Ler-View $null
+            $kg = @($lidas.Values | Where-Object { $_['unidade'] -eq 'KG' }).Count
+            $of = @($lidas.Values | Where-Object { $_['preco_promocional'] }).Count
+            Registrar "  VIEW lida: $($lidas.Count) linha(s) ($kg por kg, $of com preço promocional). Conexão com o banco: OK."
+            if ($usaIncremental) { $null = Ler-View ((Get-Date).AddDays(-1)); Registrar '  Coluna data_alteracao: OK (leitura incremental disponível).' }
+        } catch { Registrar "  FALHOU: $(Descrever-Erro $_)" }
+        try { $null = Enviar-Sinal $null; Registrar "  Servidor Simplifica ($url): OK." } catch { Registrar "  Servidor Simplifica ($url): FALHOU: $(Descrever-Erro $_)" }
+        return
+    }
+
+    Registrar "Agente $versaoAgente (modo banco) iniciado. VIEW $view -> $url. Incremental a cada $intervaloMin min ($(if ($usaIncremental) { 'por data_alteracao' } else { 'VIEW inteira comparada' })); completa ao iniciar e às $horarioCompleta; sinal a cada $intervaloSinal min."
+    Limpar-Antigos $pastaLogs 'agente-*.log'
+    $estado = Ler-Estado ([pscustomobject]@{ hashFotoEnviada = $null; ultimaCompleta = $null; completaNoHorario = $null; incrementalDesde = $null })
+    foreach ($campo in 'hashFotoEnviada', 'ultimaCompleta', 'completaNoHorario', 'incrementalDesde') {
+        if (-not ($estado.PSObject.Properties.Name -contains $campo)) { $estado | Add-Member -NotePropertyName $campo -NotePropertyValue $null }
+    }
+    $precisaCompleta = $true
+    $reenviarFoto = $false
+    $falhasColeta = 0; $proximaColeta = Get-Date
+    $falhasEnvio = 0; $proximoEnvio = Get-Date
+    $proximoSinal = (Get-Date).AddSeconds(20)
+    $diaLimpeza = (Get-Date).Date
+
+    while ($true) {
+        $agora = Get-Date
+        $hoje = $agora.ToString('yyyy-MM-dd')
+        if (-not $precisaCompleta -and $agora.ToString('HH:mm') -ge $horarioCompleta -and $estado.completaNoHorario -ne $hoje) {
+            Registrar "Horário da leitura completa ($horarioCompleta)."
+            $estado.completaNoHorario = $hoje
+            $precisaCompleta = $true
+        }
+
+        if ($agora -ge $proximaColeta -and ($precisaCompleta -or -not $estado.incrementalDesde -or
+                $agora -ge ([datetime]$estado.incrementalDesde).AddMinutes($intervaloMin))) {
+            try {
+                if ($precisaCompleta -or -not $foto.Count) {
+                    $res = Coleta-Completa
+                    if ($res.hash -ne $estado.hashFotoEnviada -or $reenviarFoto) {
+                        Enfileirar 'COMPLETA' @($foto.Values) @() $res.hash
+                        $estado.hashFotoEnviada = $res.hash
+                    } else { Registrar 'Foto igual à última enviada: nada a enviar.' }
+                    $estado.ultimaCompleta = $hoje
+                    if ($agora.ToString('HH:mm') -ge $horarioCompleta) { $estado.completaNoHorario = $hoje }
+                    $precisaCompleta = $false; $reenviarFoto = $false
+                } else {
+                    $res = Coleta-Incremental (([datetime]$estado.incrementalDesde).AddMinutes(-$folgaMin))
+                    if ($res.mudados.Count -or $res.excluidos.Count) {
+                        $hash = Hash-Foto
+                        # Linha que virou ativo = N vai no pacote como está (o servidor a tira da loja).
+                        $linhas = [string[]]($res.mudados.ToArray() | ForEach-Object { $foto[$_] })
+                        Enfileirar 'PARCIAL' $linhas $res.excluidos.ToArray() $hash
+                        $estado.hashFotoEnviada = $hash
+                    }
+                }
+                $estado.incrementalDesde = $res.inicio.ToString('o')
+                Salvar-Estado $estado
+                $falhasColeta = 0
+            } catch {
+                $espera = Espera-Segundos $falhasColeta
+                $falhasColeta++
+                $proximaColeta = (Get-Date).AddSeconds($espera)
+                Registrar "Falha na leitura do banco: $(Descrever-Erro $_) (linha $($_.InvocationInfo.ScriptLineNumber)). Nova tentativa em $espera s."
+            }
+        }
+
+        if ((Get-Date) -ge $proximoEnvio -and (Get-ChildItem $pastaFila -Filter '*.json.gz' | Select-Object -First 1)) {
+            try { Enviar-Fila; $falhasEnvio = 0 } catch {
+                $espera = Espera-Segundos $falhasEnvio
+                $falhasEnvio++
+                $proximoEnvio = (Get-Date).AddSeconds($espera)
+                Registrar "Falha ao enviar pacote: $(Descrever-Erro $_). Fica na fila; nova tentativa em $espera s."
+            }
+        }
+
+        if ((Get-Date) -ge $proximoSinal) {
+            try {
+                $resposta = Enviar-Sinal $estado.hashFotoEnviada
+                if ($resposta.fazerCompleta -eq $true -and -not $precisaCompleta) {
+                    Registrar 'O servidor sinalizou "fazer completa".'
+                    $precisaCompleta = $true; $proximaColeta = Get-Date
+                }
+                if ($resposta.enviarArquivo -eq $true -and -not (Get-ChildItem $pastaFila -Filter '*.json.gz' | Select-Object -First 1)) {
+                    Registrar 'O servidor não tem a foto atual da loja: nova completa e reenvio.'
+                    $precisaCompleta = $true; $reenviarFoto = $true; $proximaColeta = Get-Date
+                }
+                $proximoSinal = (Get-Date).AddMinutes($intervaloSinal)
+            } catch {
+                Registrar "Falha no sinal de vida: $(Descrever-Erro $_). Nova tentativa em 1 min."
+                $proximoSinal = (Get-Date).AddMinutes(1)
+            }
+        }
+
+        if ((Get-Date).Date -ne $diaLimpeza) {
+            $diaLimpeza = (Get-Date).Date
+            Limpar-Antigos $pastaLogs 'agente-*.log'
+            Limpar-Antigos $pastaAuditoria '*.json'
+        }
+        Start-Sleep -Seconds 5
+    }
+}
+
+# ----------------------------------------------------------------------------------------------
 
 switch ($modo) {
     'arquivo' { Executar-ModoArquivo }
     'rpinfo' { Executar-ModoRpinfo }
-    default { Registrar "Modo desconhecido no config.json: '$modo' (use 'arquivo' ou 'rpinfo')."; exit 1 }
+    'banco' { Executar-ModoBanco }
+    default { Registrar "Modo desconhecido no config.json: '$modo' (use 'arquivo', 'rpinfo' ou 'banco')."; exit 1 }
 }

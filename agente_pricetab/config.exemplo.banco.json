@@ -1,0 +1,17 @@
+{
+  "modo": "banco",
+  "url": "https://preconamao-backend.onrender.com",
+  "chave": "COLE AQUI A CHAVE DA LOJA (depois rode: proteger.ps1 -Campo chave)",
+  "intervaloSinalMinutos": 1,
+  "auditoria": true,
+  "banco": {
+    "conexao": "Driver={MySQL ODBC 9.4 Unicode Driver};Server=ENDERECO-DO-BANCO;Port=3306;Database=NOME-DO-BANCO;",
+    "usuario": "USUARIO SO COM SELECT NA VIEW",
+    "senha": "SENHA DO BANCO (depois rode: proteger.ps1 -Campo senha)",
+    "view": "vw_simplifica_precos",
+    "incremental": true,
+    "intervaloMinutos": 5,
+    "folgaMinutos": 10,
+    "horarioCompleta": "12:00"
+  }
+}
