@@ -20,13 +20,14 @@
 #
 # Uso: agente.ps1 [-Config caminho] [-TestarConexao]
 #   -TestarConexao (modo rpinfo): testa login, unidade, departamentos e 1ª página da API e sai.
-#   -TestarConexao (modo banco): lê a VIEW, confere a coluna data_alteracao e o servidor, e sai.
+#   -TestarConexao (modo banco): confere as colunas da VIEW (obrigatórias: codigo_barras, descricao,
+#                  preco), lê a VIEW, mostra o modo de leitura, testa o servidor e sai.
 
 param([string]$Config = (Join-Path $PSScriptRoot 'config.json'), [switch]$TestarConexao)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$versaoAgente = '2.1'
+$versaoAgente = '2.2'
 
 $cfg = Get-Content $Config -Raw -Encoding UTF8 | ConvertFrom-Json
 $url = $cfg.url.TrimEnd('/')
@@ -40,7 +41,14 @@ New-Item -ItemType Directory -Force $pastaLogs | Out-Null
 
 function Registrar([string]$mensagem) {
     $linha = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $mensagem
-    Add-Content -Path (Join-Path $pastaLogs ('agente-{0:yyyy-MM-dd}.log' -f (Get-Date))) -Value $linha -Encoding UTF8
+    # O log nunca derruba o agente: arquivo preso por outro programa (antivírus examinando o log
+    # recém-criado, backup) = tenta de novo por até ~2 s e, se não der, segue sem esta linha.
+    for ($tentativa = 1; $tentativa -le 10; $tentativa++) {
+        try {
+            Add-Content -Path (Join-Path $pastaLogs ('agente-{0:yyyy-MM-dd}.log' -f (Get-Date))) -Value $linha -Encoding UTF8 -ErrorAction Stop
+            break
+        } catch { Start-Sleep -Milliseconds 200 }
+    }
     Write-Host $linha
 }
 
@@ -607,8 +615,11 @@ function Executar-ModoRpinfo {
 # Oracle...), com um usuário que só tem SELECT na VIEW. Envia pacotes para POST /cargas/banco.
 # Contrato da VIEW: laboratorio/conector_banco/CONTRATO_VIEW.md.
 # ----------------------------------------------------------------------------------------------
-$colunasView = @('codigo_barras', 'descricao', 'preco', 'preco_promocional', 'promocao_ate', 'unidade', 'secao',
-    'codigo_interno', 'ativo')
+# Só codigo_barras, descricao e preco são obrigatórias; das outras, o agente lê as que a VIEW tiver
+# (nunca coluna fora desta lista). Sem codigo_interno, cada código de barras é um produto; sem
+# data_alteracao, cada leitura é a VIEW inteira comparada com a foto anterior.
+$colunasObrigatorias = @('codigo_barras', 'descricao', 'preco')
+$colunasOpcionais = @('preco_promocional', 'promocao_ate', 'unidade', 'secao', 'codigo_interno', 'ativo')
 
 function Executar-ModoBanco {
     $b = $cfg.banco
@@ -618,7 +629,9 @@ function Executar-ModoBanco {
     if (-not $b.senhaProtegida) { Registrar 'Aviso: a senha do banco está em texto aberto no config.json. Proteja com proteger.ps1.' }
     $view = if ($b.view) { [string]$b.view } else { 'vw_simplifica_precos' }
     if ($view -notmatch '^[A-Za-z_][A-Za-z0-9_.]*$') { throw "Nome de VIEW inválido no config.json: '$view'." }
-    $usaIncremental = -not ($b.incremental -eq $false)   # VIEW tem a coluna data_alteracao
+    $incrementalDesligado = $b.incremental -eq $false   # config pode desligar mesmo com data_alteracao
+    $script:colunasLidas = $null                        # colunas da lista que a VIEW tem (Conferir-Colunas)
+    $script:usaIncremental = $false
     $intervaloMin = if ($b.intervaloMinutos) { [double]$b.intervaloMinutos } else { 5 }
     $folgaMin = if ($b.folgaMinutos) { [double]$b.folgaMinutos } else { 10 }
     $horarioCompleta = if ($b.horarioCompleta) { [string]$b.horarioCompleta } else { '12:00' }
@@ -638,16 +651,48 @@ function Executar-ModoBanco {
         return ([string]$v).Trim()
     }
 
+    function Abrir-Conexao {
+        $con = New-Object System.Data.Odbc.OdbcConnection ($conexao.TrimEnd(';') + ";Uid=$usuario;Pwd=$senha;")
+        $con.Open()
+        return $con
+    }
+
+    # Lê só os NOMES das colunas da VIEW (consulta sem linhas) e decide o que pedir e o modo de leitura.
+    # Feito ao iniciar, a cada completa e depois de uma falha: a TI pode mudar a VIEW sem reinstalar.
+    function Conferir-Colunas {
+        $con = Abrir-Conexao
+        try {
+            $cmd = $con.CreateCommand()
+            $cmd.CommandTimeout = 60
+            $cmd.CommandText = "SELECT * FROM $view WHERE 1 = 0"
+            $leitor = $cmd.ExecuteReader()
+            $existentes = @(for ($i = 0; $i -lt $leitor.FieldCount; $i++) { $leitor.GetName($i).ToLowerInvariant() })
+            $leitor.Close()
+        } finally { $con.Close() }
+        $faltam = @($colunasObrigatorias | Where-Object { $existentes -notcontains $_ })
+        if ($faltam.Count) { throw "A VIEW $view não tem a(s) coluna(s) obrigatória(s): $($faltam -join ', ')." }
+        $novas = @($colunasObrigatorias) + @($colunasOpcionais | Where-Object { $existentes -contains $_ })
+        $incremental = ($existentes -contains 'data_alteracao') -and -not $incrementalDesligado
+        if (($novas -join ',') -ne ($script:colunasLidas -join ',') -or $incremental -ne $script:usaIncremental) {
+            $ausentes = @($colunasOpcionais | Where-Object { $existentes -notcontains $_ })
+            Registrar ("Colunas da VIEW: {0}{1}. Leitura: {2}." -f ($novas -join ', '),
+                $(if ($ausentes.Count) { " (sem $($ausentes -join ', '))" } else { '' }),
+                $(if ($incremental) { 'só o que mudou, por data_alteracao' } elseif ($existentes -contains 'data_alteracao') { 'VIEW inteira comparada (incremental desligado no config.json)' } else { 'VIEW inteira comparada (sem data_alteracao)' }))
+        }
+        $script:colunasLidas = $novas
+        $script:usaIncremental = $incremental
+    }
+
     # Lê a VIEW (toda, ou só o que mudou desde $desde). Devolve codigo_barras -> linha (ordered).
     function Ler-View($desde) {
-        $cs = $conexao.TrimEnd(';') + ";Uid=$usuario;Pwd=$senha;"
-        $con = New-Object System.Data.Odbc.OdbcConnection $cs
+        if (-not $script:colunasLidas) { Conferir-Colunas }
+        $colunas = $script:colunasLidas
         $linhas = @{}
+        $con = Abrir-Conexao
         try {
-            $con.Open()
             $cmd = $con.CreateCommand()
             $cmd.CommandTimeout = 300
-            $sql = "SELECT $($colunasView -join ', ') FROM $view"
+            $sql = "SELECT $($colunas -join ', ') FROM $view"
             if ($null -ne $desde) {
                 $sql += ' WHERE data_alteracao >= ?'
                 $p = New-Object System.Data.Odbc.OdbcParameter('desde', [System.Data.Odbc.OdbcType]::DateTime)
@@ -658,7 +703,7 @@ function Executar-ModoBanco {
             $leitor = $cmd.ExecuteReader()
             while ($leitor.Read()) {
                 $l = [ordered]@{}
-                for ($i = 0; $i -lt $colunasView.Count; $i++) { $l[$colunasView[$i]] = Valor ($leitor.GetValue($i)) }
+                for ($i = 0; $i -lt $colunas.Count; $i++) { $l[$colunas[$i]] = Valor ($leitor.GetValue($i)) }
                 if ($l['codigo_barras']) { $linhas[$l['codigo_barras']] = $l }
             }
             $leitor.Close()
@@ -667,6 +712,10 @@ function Executar-ModoBanco {
     }
 
     function Json-Linha($l) { return ($l | ConvertTo-Json -Compress) }
+
+    # Produto do ERP a que a linha pertence: codigo_interno; sem ele (coluna ausente ou vazia), o
+    # próprio código de barras (o servidor faz o mesmo ao gravar o produto).
+    function Interno-De($l) { if ($l['codigo_interno']) { return [string]$l['codigo_interno'] } return [string]$l['codigo_barras'] }
 
     function Hash-Foto {
         $partes = foreach ($k in ($foto.Keys | Sort-Object)) { "$k=$(Hash-Texto $foto[$k])" }
@@ -713,9 +762,10 @@ function Executar-ModoBanco {
     # Completa: a VIEW inteira vira a foto.
     function Coleta-Completa {
         $inicio = Get-Date
+        Conferir-Colunas
         $lidas = Ler-View $null
         $foto.Clear(); $internoDe.Clear()
-        foreach ($k in $lidas.Keys) { $foto[$k] = Json-Linha $lidas[$k]; $internoDe[$k] = $lidas[$k]['codigo_interno'] }
+        foreach ($k in $lidas.Keys) { $foto[$k] = Json-Linha $lidas[$k]; $internoDe[$k] = (Interno-De $lidas[$k]) }
         Registrar ("Leitura COMPLETA da VIEW {0}: {1} linha(s) em {2:N1} s." -f $view, $foto.Count, ((Get-Date) - $inicio).TotalSeconds)
         return @{ hash = (Hash-Foto); inicio = $inicio }
     }
@@ -726,10 +776,10 @@ function Executar-ModoBanco {
         $inicio = Get-Date
         $mudados = New-Object System.Collections.Generic.List[string]
         $excluidos = New-Object System.Collections.Generic.List[string]
-        $lidas = if ($usaIncremental) { Ler-View $desde } else { Ler-View $null }
+        $lidas = if ($script:usaIncremental) { Ler-View $desde } else { Ler-View $null }
         foreach ($k in $lidas.Keys) {
             $j = Json-Linha $lidas[$k]
-            if ($foto[$k] -ne $j) { $foto[$k] = $j; $internoDe[$k] = $lidas[$k]['codigo_interno']; $mudados.Add($k) }
+            if ($foto[$k] -ne $j) { $foto[$k] = $j; $internoDe[$k] = (Interno-De $lidas[$k]); $mudados.Add($k) }
         }
         # O servidor tira da loja os códigos de um produto (codigo_interno) que não vierem no pacote
         # PARCIAL: manda TODOS os códigos de barras de cada produto que mudou, não só a linha mudada.
@@ -740,7 +790,7 @@ function Executar-ModoBanco {
                 if (-not $mudados.Contains($k) -and $internoDe[$k] -and $internosMudados.ContainsKey([string]$internoDe[$k])) { $mudados.Add($k) }
             }
         }
-        if (-not $usaIncremental) {
+        if (-not $script:usaIncremental) {
             foreach ($k in @($foto.Keys)) {
                 if (-not $lidas.ContainsKey($k)) {
                     if ($internoDe[$k]) { $excluidos.Add([string]$internoDe[$k]) }
@@ -749,7 +799,7 @@ function Executar-ModoBanco {
             }
         }
         Registrar ("Leitura incremental{0}: {1} linha(s) lida(s), {2} mudada(s), {3} removida(s) em {4:N1} s." -f
-            $(if ($usaIncremental) { " desde {0:dd/MM HH:mm}" -f $desde } else { ' (VIEW inteira, sem data_alteracao)' }),
+            $(if ($script:usaIncremental) { " desde {0:dd/MM HH:mm}" -f $desde } else { ' (VIEW inteira, sem data_alteracao)' }),
             $lidas.Count, $mudados.Count, $excluidos.Count, ((Get-Date) - $inicio).TotalSeconds)
         return @{ mudados = $mudados; excluidos = $excluidos; inicio = $inicio }
     }
@@ -757,17 +807,20 @@ function Executar-ModoBanco {
     if ($TestarConexao) {
         Registrar "Teste de conexão com o banco (VIEW $view)..."
         try {
+            Conferir-Colunas
             $lidas = Ler-View $null
             $kg = @($lidas.Values | Where-Object { $_['unidade'] -eq 'KG' }).Count
             $of = @($lidas.Values | Where-Object { $_['preco_promocional'] }).Count
             Registrar "  VIEW lida: $($lidas.Count) linha(s) ($kg por kg, $of com preço promocional). Conexão com o banco: OK."
-            if ($usaIncremental) { $null = Ler-View ((Get-Date).AddDays(-1)); Registrar '  Coluna data_alteracao: OK (leitura incremental disponível).' }
+            if ($script:usaIncremental) { $null = Ler-View ((Get-Date).AddDays(-1)); Registrar '  Coluna data_alteracao: OK (leitura incremental disponível).' }
+            else { Registrar '  Sem data_alteracao: a cada ciclo a VIEW inteira é lida e comparada com a anterior (só o que mudou é enviado).' }
+            if ($script:colunasLidas -notcontains 'codigo_interno') { Registrar '  Sem codigo_interno: cada código de barras é tratado como um produto.' }
         } catch { Registrar "  FALHOU: $(Descrever-Erro $_)" }
         try { $null = Enviar-Sinal $null; Registrar "  Servidor Simplifica ($url): OK." } catch { Registrar "  Servidor Simplifica ($url): FALHOU: $(Descrever-Erro $_)" }
         return
     }
 
-    Registrar "Agente $versaoAgente (modo banco) iniciado. VIEW $view -> $url. Incremental a cada $intervaloMin min ($(if ($usaIncremental) { 'por data_alteracao' } else { 'VIEW inteira comparada' })); completa ao iniciar e às $horarioCompleta; sinal a cada $intervaloSinal min."
+    Registrar "Agente $versaoAgente (modo banco) iniciado. VIEW $view -> $url. Leitura a cada $intervaloMin min (colunas e modo conferidos na 1ª leitura); completa ao iniciar e às $horarioCompleta; sinal a cada $intervaloSinal min."
     Limpar-Antigos $pastaLogs 'agente-*.log'
     $estado = Ler-Estado ([pscustomobject]@{ hashFotoEnviada = $null; ultimaCompleta = $null; completaNoHorario = $null; incrementalDesde = $null })
     foreach ($campo in 'hashFotoEnviada', 'ultimaCompleta', 'completaNoHorario', 'incrementalDesde') {
@@ -818,6 +871,7 @@ function Executar-ModoBanco {
                 $espera = Espera-Segundos $falhasColeta
                 $falhasColeta++
                 $proximaColeta = (Get-Date).AddSeconds($espera)
+                $script:colunasLidas = $null; $precisaCompleta = $true   # a VIEW pode ter mudado: confere as colunas e refaz a foto
                 Registrar "Falha na leitura do banco: $(Descrever-Erro $_) (linha $($_.InvocationInfo.ScriptLineNumber)). Nova tentativa em $espera s."
             }
         }

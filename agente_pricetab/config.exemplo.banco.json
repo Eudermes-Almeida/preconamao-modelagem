@@ -9,7 +9,6 @@
     "usuario": "USUARIO SO COM SELECT NA VIEW",
     "senha": "SENHA DO BANCO (depois rode: proteger.ps1 -Campo senha)",
     "view": "vw_simplifica_precos",
-    "incremental": true,
     "intervaloMinutos": 5,
     "folgaMinutos": 10,
     "horarioCompleta": "12:00"

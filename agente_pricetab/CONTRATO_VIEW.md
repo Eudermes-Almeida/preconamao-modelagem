@@ -24,12 +24,19 @@ Simplifica Compras lê no banco de dados do ERP.
 | `promocao_ate` | data | não | Último dia da oferta. Oferta vencida é ignorada. |
 | `unidade` | texto (2) | não | `KG` = vendido na balança; `UN` = unidade. |
 | `secao` | texto (até 60) | não | Seção/departamento do ERP (ajuda a posicionar o produto no mapa da loja). |
-| `codigo_interno` | texto | recomendada | Código do produto no ERP. Agrupa os códigos de barras do mesmo produto. |
+| `codigo_interno` | texto | recomendada | Código do produto no ERP. Agrupa os códigos de barras do mesmo produto. Sem ela, cada código de barras é tratado como um produto. |
 | `ativo` | `S`/`N` ou 1/0 | não | `N` = produto fora de linha (sai do aplicativo). Sem a coluna = todos ativos. |
 | `data_alteracao` | data e hora | recomendada | Última alteração de preço, oferta ou cadastro. Permite ler **só o que mudou** a cada poucos minutos. Deve mudar em todas as linhas (códigos) do produto. |
 
+**Mínimo:** uma VIEW só com `codigo_barras`, `descricao` e `preco` já funciona. O agente confere
+as colunas da VIEW ao iniciar e a cada leitura completa: as opcionais que existirem são usadas, as
+que faltarem têm o comportamento descrito na tabela, e colunas novas passam a valer sem reinstalar.
+Sem `data_alteracao`, cada leitura é da VIEW inteira, comparada com a anterior (só o que mudou é
+enviado). Faltando uma obrigatória, o agente para e informa qual no log e no teste de conexão.
+
 **Não incluir:** custo, margem, estoque, fornecedor, dados fiscais ou de clientes. O agente
-pede exatamente as colunas acima e mais nenhuma.
+pede só as colunas acima (as que a VIEW tiver) e mais nenhuma: outra coluna que esteja na VIEW é
+ignorada e nunca sai da loja.
 
 ## Exemplo (MySQL)
 

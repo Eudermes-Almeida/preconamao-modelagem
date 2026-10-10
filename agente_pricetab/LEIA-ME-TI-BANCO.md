@@ -20,7 +20,8 @@ tem SELECT nela. Nada é gravado no ERP e nenhuma porta é aberta.
 
 - **Leitura completa:** ao ligar o agente e uma vez por dia, no horário combinado.
 - **Leitura incremental:** a cada 5 minutos (configurável), só das linhas com `data_alteracao`
-  recente. Sem essa coluna, o agente lê a VIEW inteira e compara com a última leitura.
+  recente. Sem essa coluna, o agente lê a VIEW inteira e compara com a última leitura (envia só o
+  que mudou). O agente descobre sozinho quais colunas a VIEW tem; não há nada a configurar.
 - **Envio:** pacotes JSON compactados, por HTTPS, **só de saída**, para um único endereço.
 
 ## 2. O que a TI prepara
@@ -36,9 +37,12 @@ tem SELECT nela. Nada é gravado no ERP e nenhuma porta é aberta.
 | `promocao_ate` | não | último dia da oferta (vencida é ignorada) |
 | `unidade` | não | `KG` (balança) ou `UN` |
 | `secao` | não | seção/departamento |
-| `codigo_interno` | recomendada | código do produto no ERP (agrupa os EANs do produto) |
-| `ativo` | não | `N` = fora de linha |
+| `codigo_interno` | recomendada | código do produto no ERP (agrupa os EANs do produto); sem ela, cada EAN é tratado como um produto |
+| `ativo` | não | `N` = fora de linha; sem ela, todos ativos (produto fora de linha = tirar da VIEW) |
 | `data_alteracao` | recomendada | última alteração de preço/cadastro (permite a leitura incremental) |
+
+Só as três primeiras são obrigatórias: uma VIEW com `codigo_barras`, `descricao` e `preco` já
+funciona. As demais podem ser incluídas a qualquer momento, sem reinstalar o agente.
 
 **Não inclua** custo, margem, estoque, fornecedor, dados fiscais ou de clientes. Exemplo completo
 de VIEW em `CONTRATO_VIEW.md`.
@@ -70,8 +74,8 @@ ligado no horário de funcionamento, com:
 | Número do driver | o número do driver do seu banco, na lista que aparece |
 | Servidor, porta e nome do banco | `10.0.0.5`, `3306`, `erp` |
 | Servidor Simplifica Compras | informado pela Simplifica Compras |
-| Usuário, VIEW e se tem `data_alteracao` | `simplifica_leitura`, `vw_simplifica_precos`, `S` |
-| Intervalo incremental e horário da completa | `5` e `12:00` |
+| Usuário e nome da VIEW | `simplifica_leitura`, `vw_simplifica_precos` |
+| Intervalo de leitura e horário da completa | `5` e `12:00` |
 | Chave da loja e senha do banco | colar com o **botão direito** do mouse |
 
 4. O instalador **testa a VIEW e o servidor antes de registrar qualquer coisa**. Se tudo der
@@ -80,8 +84,8 @@ ligado no horário de funcionamento, com:
 
 ## 4. Segurança
 
-- **Somente leitura e só a VIEW:** as colunas pedidas estão fixas no agente; nada é gravado no
-  ERP.
+- **Somente leitura e só a VIEW:** o agente pede só as colunas do contrato (tabela acima) que a
+  VIEW tiver; qualquer outra coluna da VIEW é ignorada e nunca sai da loja. Nada é gravado no ERP.
 - **Sem portas abertas:** o agente não escuta conexões e não aceita comandos de fora. As respostas
   do servidor são só sinais fixos ("envie de novo", "faça uma leitura completa").
 - **Sem atualização automática:** toda versão nova é entregue à TI e instalada por ela.
@@ -111,6 +115,8 @@ powershell -ExecutionPolicy Bypass -File agente.ps1 -TestarConexao
 **Problemas comuns:**
 - **"Access denied for user"**: usuário ou senha do banco, ou falta o GRANT SELECT na VIEW.
 - **"Data source name not found"**: o driver ODBC de 64 bits não está instalado.
+- **"A VIEW ... não tem a(s) coluna(s) obrigatória(s)"**: a VIEW precisa de `codigo_barras`,
+  `descricao` e `preco` com esses nomes (use `AS` na VIEW).
 - **"Outro agente já está registrado para esta loja"**: peça à Simplifica Compras a liberação
   (troca de computador).
 

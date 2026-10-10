@@ -2,7 +2,7 @@
 #   1. Mostra os drivers ODBC instalados e pergunta qual usar (o driver oficial do banco do ERP:
 #      MySQL Connector/ODBC, ODBC Driver for SQL Server, psqlODBC, Firebird ODBC, Oracle...).
 #   2. Pergunta o endereço do servidor Simplifica, a chave da loja, o servidor/porta/nome do banco,
-#      o usuário (só SELECT na VIEW) e a senha, o nome da VIEW e se ela tem data_alteracao.
+#      o usuário (só SELECT na VIEW) e a senha e o nome da VIEW (as colunas o agente confere sozinho).
 #   3. Grava o config.json e PROTEGE a chave e a senha pelo Windows (DPAPI): só este computador lê.
 #   4. Testa a leitura da VIEW e a conexão com o servidor Simplifica.
 #   5. Registra a tarefa "SimplificaCompras-AgenteBanco", que inicia junto com o Windows, inicia o
@@ -96,8 +96,7 @@ $config = [ordered]@{
         conexao          = $conexao
         usuario          = Perguntar 'Usuário do banco (só SELECT na VIEW)' $(if ($b.usuario -and $b.usuario -notmatch ' ') { $b.usuario } else { 'simplifica_leitura' })
         view             = Perguntar 'Nome da VIEW' $(if ($b.view) { $b.view } else { 'vw_simplifica_precos' })
-        incremental      = (Perguntar 'A VIEW tem a coluna data_alteracao? (S/N)' $(if ($b.incremental -eq $false) { 'N' } else { 'S' })) -match '^[sS]'
-        intervaloMinutos = [double](Perguntar 'Leitura incremental a cada quantos minutos' $(if ($b.intervaloMinutos) { $b.intervaloMinutos } else { 5 }))
+        intervaloMinutos = [double](Perguntar 'Ler a VIEW a cada quantos minutos' $(if ($b.intervaloMinutos) { $b.intervaloMinutos } else { 5 }))
         folgaMinutos     = if ($b.folgaMinutos) { $b.folgaMinutos } else { 10 }
         horarioCompleta  = Perguntar 'Horário da leitura completa diária (HH:mm)' $(if ($b.horarioCompleta) { $b.horarioCompleta } else { '12:00' })
     }
@@ -107,6 +106,9 @@ $senha = Perguntar-Segredo 'Senha do usuário do banco' ([bool]$b.senhaProtegida
 if ($config.banco.horarioCompleta -notmatch '^\d{2}:\d{2}$') { throw 'Horário inválido (use HH:mm, ex.: 12:00).' }
 
 # Grava o config SEM segredos e protege a chave e a senha (mantém as já protegidas se o Enter foi usado).
+# Colunas e modo de leitura (data_alteracao) o agente descobre sozinho na VIEW; só um
+# "incremental": false já gravado (desligar de propósito) é mantido.
+if ($b.incremental -eq $false) { $config.banco['incremental'] = $false }
 if ($base.chaveProtegida) { $config['chaveProtegida'] = $base.chaveProtegida }
 if ($b.senhaProtegida) { $config.banco['senhaProtegida'] = $b.senhaProtegida }
 [IO.File]::WriteAllText($caminhoConfig, ($config | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
