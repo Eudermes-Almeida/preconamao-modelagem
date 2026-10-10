@@ -34,13 +34,30 @@ perguntar() {
     printf '%s' "${resposta:-$2}"
 }
 
-# Segredo: não aparece na tela. Com valor anterior, Enter mantém o anterior.
+# Lê sem mostrar o texto, com um * por caractere (para a pessoa ver que digitou/colou algo).
+# Backspace apaga; os marcadores invisíveis de "colagem" de alguns terminais (ESC[200~ e
+# ESC[201~) são ignorados.
+ler_oculto() {
+    local c resto valor=''
+    printf '%s' "$1" >&2
+    while IFS= read -r -s -n1 c; do
+        case "$c" in
+            '' | $'\r') break ;;
+            $'\e') IFS= read -r -s -n5 -t 0.1 resto || true ;;
+            $'\x7f' | $'\b') if [ -n "$valor" ]; then valor="${valor%?}"; printf '\b \b' >&2; fi ;;
+            *) valor+="$c"; printf '*' >&2 ;;
+        esac
+    done
+    echo >&2
+    printf '%s' "$valor"
+}
+
+# Segredo: aparece um * por caractere. Com valor anterior, Enter mantém o anterior.
 perguntar_segredo() {
     local texto="$1" anterior="${2:-}" valor tentativa sufixo=''
     [ -n "$anterior" ] && sufixo=' (Enter mantém o atual)'
     for tentativa in 1 2 3; do
-        read -r -s -p "$texto$sufixo: " valor || true
-        echo >&2
+        valor="$(ler_oculto "$texto$sufixo: ")"
         valor="$(printf '%s' "$valor" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
         if [ -z "$valor" ]; then
             if [ -n "$anterior" ]; then printf '%s' "$anterior"; return 0; fi
@@ -49,6 +66,8 @@ perguntar_segredo() {
         if [ "${#valor}" -lt 4 ] || printf '%s' "$valor" | grep -q '[[:cntrl:]]'; then
             amarelo '  Valor inválido (mínimo 4 caracteres). Tente de novo.' >&2; continue
         fi
+        # O segredo não aparece na tela: mostra só o tamanho, para conferir se colou certo.
+        echo "  (recebido: ${#valor} caracteres)" >&2
         printf '%s' "$valor"; return 0
     done
     vermelho "Não foi possível ler: $texto. Rode o instalador de novo." >&2
