@@ -13,12 +13,15 @@
 #   completa"). Sem atualização automática: toda versão nova é instalada pela TI da loja.
 # - Chave da loja e senha da API podem ficar PROTEGIDAS pelo Windows (DPAPI, ver proteger.ps1):
 #   só este computador consegue ler. Nunca aparecem no log.
+# - Linux (PowerShell 7, serviço systemd): não há DPAPI; o config.json fica legível só pelo usuário
+#   do serviço (chmod 600, feito pelo instalar.sh) e o agente avisa no log se não estiver assim.
 # - Esperas crescentes com variação aleatória entre tentativas (não sobrecarrega a rede nem o servidor).
 # - Modo rpinfo: só envia código, código de barras, descrição, preços, oferta (só as já vigentes),
 #   departamento, balança e se está ativo. Custo, margem, estoque, fornecedor e dados fiscais NÃO
 #   saem da loja. Cópia legível de cada pacote enviado na pasta "auditoria" (modo auditoria).
 #
 # Uso: agente.ps1 [-Config caminho] [-TestarConexao]
+#   -TestarConexao (modo arquivo): confere se o arquivo existe e pode ser lido, testa o servidor e sai.
 #   -TestarConexao (modo rpinfo): testa login, unidade, departamentos e 1ª página da API e sai.
 #   -TestarConexao (modo banco): confere as colunas da VIEW (obrigatórias: codigo_barras, descricao,
 #                  preco), lê a VIEW, mostra o modo de leitura, testa o servidor e sai.
@@ -27,7 +30,8 @@ param([string]$Config = (Join-Path $PSScriptRoot 'config.json'), [switch]$Testar
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$versaoAgente = '2.3'
+$versaoAgente = '2.4'
+$noLinux = [bool]$IsLinux   # $IsLinux só existe no PowerShell 7 (no 5.1 do Windows é vazio = falso)
 
 $cfg = Get-Content $Config -Raw -Encoding UTF8 | ConvertFrom-Json
 $url = $cfg.url.TrimEnd('/')
@@ -65,6 +69,7 @@ function Ler-Segredo($valor) {
     if ($null -eq $valor) { return $null }
     $texto = [string]$valor
     if (-not $texto.StartsWith('dpapi:')) { return $texto }
+    if ($noLinux) { throw 'Valor "dpapi:" no config.json: a proteção do Windows não existe no Linux. Grave a chave/senha em texto no config.json (o instalar.sh deixa o arquivo legível só pelo serviço).' }
     Add-Type -AssemblyName System.Security
     $bytes = [Convert]::FromBase64String($texto.Substring(6))
     $claro = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
@@ -72,11 +77,17 @@ function Ler-Segredo($valor) {
 }
 
 $chave = Ler-Segredo $(if ($cfg.chaveProtegida) { $cfg.chaveProtegida } else { $cfg.chave })
-if (-not $cfg.chaveProtegida) { Registrar 'Aviso: a chave da loja está em texto aberto no config.json. Proteja com proteger.ps1.' }
+if ($noLinux) {
+    # Linux: o segredo fica no config.json; basta ninguém além do dono (usuário do serviço) ler.
+    $modoArquivo = (Get-Item $Config).UnixMode
+    if ($modoArquivo -and $modoArquivo.Substring(4) -match 'r') { Registrar "Aviso: o config.json pode ser lido por outros usuários ($modoArquivo). Rode: chmod 600 $Config" }
+} elseif (-not $cfg.chaveProtegida) { Registrar 'Aviso: a chave da loja está em texto aberto no config.json. Proteja com proteger.ps1.' }
 
 # Identificação do agente (só 1 agente por loja): computador + pasta de instalação, em resumo.
+# Windows: MachineGuid do registro; Linux: /etc/machine-id (gerado na instalação do sistema).
 function Id-Agente {
-    $maquina = try { (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid } catch { $env:COMPUTERNAME }
+    $maquina = if ($noLinux) { try { (Get-Content '/etc/machine-id' -Raw).Trim() } catch { [Environment]::MachineName } }
+               else { try { (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid } catch { $env:COMPUTERNAME } }
     $resumo = Hash-Texto ("$maquina|$PSScriptRoot".ToLowerInvariant())
     return 'ag-' + $resumo.Substring(0, 32)
 }
@@ -181,6 +192,18 @@ function Executar-ModoArquivo {
         $resposta = Invoke-WebRequest -Uri "$url/cargas/pricetab" -Method Post -Body $bytes `
             -ContentType 'text/plain; charset=ISO-8859-1' -Headers $cabecalhos -UseBasicParsing -TimeoutSec 120
         return (Ler-Corpo $resposta) | ConvertFrom-Json
+    }
+
+    if ($TestarConexao) {
+        Registrar "Teste do modo arquivo ('$arquivo')..."
+        try {
+            if (-not (Test-Path $cfg.pasta)) { throw "pasta não encontrada: $($cfg.pasta)" }
+            if (-not (Test-Path $arquivo)) { throw "arquivo não encontrado (o agente fica aguardando ele aparecer)" }
+            $fluxo = [IO.File]::Open($arquivo, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite); $fluxo.Dispose()
+            Registrar "  Arquivo lido: $((Get-Item $arquivo).Length) bytes. Leitura do arquivo: OK."
+        } catch { Registrar "  Arquivo: FALHOU: $($_.Exception.Message)" }
+        try { $null = Enviar-Sinal $null; Registrar "  Servidor Simplifica ($url): OK." } catch { Registrar "  Servidor Simplifica ($url): FALHOU: $(Descrever-Erro $_)" }
+        return
     }
 
     Registrar "Agente $versaoAgente (modo arquivo) iniciado. Vigiando '$arquivo' -> $url (sinal a cada $intervaloSinal min)."
@@ -301,7 +324,7 @@ function Executar-ModoRpinfo {
     $apiUrl = ([string]$r.url).TrimEnd('/')
     $usuario = [string]$r.usuario
     $senha = Ler-Segredo $(if ($r.senhaProtegida) { $r.senhaProtegida } else { $r.senha })
-    if (-not $r.senhaProtegida) { Registrar 'Aviso: a senha da API está em texto aberto no config.json. Proteja com proteger.ps1.' }
+    if (-not $r.senhaProtegida -and -not $noLinux) { Registrar 'Aviso: a senha da API está em texto aberto no config.json. Proteja com proteger.ps1.' }
     $cnpj = [string]$r.cnpj
     $tamanhoPagina = if ($r.tamanhoPagina) { [int]$r.tamanhoPagina } else { 100 }
     $intervaloMin = if ($r.intervaloMinutos) { [double]$r.intervaloMinutos } else { 5 }
@@ -585,6 +608,8 @@ function Executar-ModoRpinfo {
         if ((Get-Date) -ge $proximoSinal) {
             try {
                 $resposta = Enviar-Sinal $estado.hashFotoEnviada
+                # O servidor voltou a responder: a fila tenta já, sem esperar o fim da espera crescente.
+                if ($falhasEnvio -gt 0) { $proximoEnvio = Get-Date }
                 if ($resposta.fazerCompleta -eq $true -and -not $precisaCompleta) {
                     Registrar 'O servidor sinalizou "fazer completa".'
                     $precisaCompleta = $true; $proximaColeta = Get-Date
@@ -626,7 +651,7 @@ function Executar-ModoBanco {
     $conexao = [string]$b.conexao
     $usuario = [string]$b.usuario
     $senha = Ler-Segredo $(if ($b.senhaProtegida) { $b.senhaProtegida } else { $b.senha })
-    if (-not $b.senhaProtegida) { Registrar 'Aviso: a senha do banco está em texto aberto no config.json. Proteja com proteger.ps1.' }
+    if (-not $b.senhaProtegida -and -not $noLinux) { Registrar 'Aviso: a senha do banco está em texto aberto no config.json. Proteja com proteger.ps1.' }
     $view = if ($b.view) { [string]$b.view } else { 'vw_simplifica_precos' }
     if ($view -notmatch '^[A-Za-z_][A-Za-z0-9_.]*$') { throw "Nome de VIEW inválido no config.json: '$view'." }
     $incrementalDesligado = $b.incremental -eq $false   # config pode desligar mesmo com data_alteracao
@@ -913,6 +938,8 @@ function Executar-ModoBanco {
         if ((Get-Date) -ge $proximoSinal) {
             try {
                 $resposta = Enviar-Sinal $estado.hashFotoEnviada
+                # O servidor voltou a responder: a fila tenta já, sem esperar o fim da espera crescente.
+                if ($falhasEnvio -gt 0) { $proximoEnvio = Get-Date }
                 if ($resposta.fazerCompleta -eq $true -and -not $precisaCompleta) {
                     Registrar 'O servidor sinalizou "fazer completa".'
                     $precisaCompleta = $true; $proximaColeta = Get-Date

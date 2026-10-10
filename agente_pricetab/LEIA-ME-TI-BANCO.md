@@ -67,6 +67,9 @@ ligado no horário de funcionamento, com:
 - **saída HTTPS (porta 443)** para o endereço do servidor Simplifica Compras. Nenhuma regra de
   entrada é necessária.
 
+**Ou um servidor Linux** (com systemd): o mesmo agente roda como serviço, com o instalador
+`instalar.sh`. Veja **`LEIA-ME-TI-LINUX.md`**.
+
 ## 3. Instalação (cerca de 5 minutos)
 
 1. Copie a pasta `agente_banco` para o computador do agente (ex.: `C:\SimplificaCompras\agente_banco`).
