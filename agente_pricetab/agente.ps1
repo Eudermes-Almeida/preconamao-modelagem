@@ -27,7 +27,7 @@ param([string]$Config = (Join-Path $PSScriptRoot 'config.json'), [switch]$Testar
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$versaoAgente = '2.2'
+$versaoAgente = '2.3'
 
 $cfg = Get-Content $Config -Raw -Encoding UTF8 | ConvertFrom-Json
 $url = $cfg.url.TrimEnd('/')
@@ -683,20 +683,34 @@ function Executar-ModoBanco {
         $script:usaIncremental = $incremental
     }
 
+    # Marca d'água da leitura incremental no RELÓGIO DO BANCO: a maior data_alteracao já lida. A
+    # próxima leitura pede "data_alteracao >= marca - folga", sem depender do fuso/relógio deste
+    # computador (banco em UTC e agente no horário de Brasília, ou o contrário, não perde mudança).
+    # Data absurda (mais de 1 dia à frente deste relógio, ex.: ano 2099 digitado errado) não vira
+    # marca, senão a incremental ficaria cega até a próxima completa.
+    $script:marcaBanco = $null
+    $script:maiorLida = $null
+
     # Lê a VIEW (toda, ou só o que mudou desde $desde). Devolve codigo_barras -> linha (ordered).
+    # Com leitura incremental, também lê data_alteracao (só para a marca; não vai no pacote).
     function Ler-View($desde) {
         if (-not $script:colunasLidas) { Conferir-Colunas }
         $colunas = $script:colunasLidas
         $linhas = @{}
+        $script:maiorLida = $null
+        $limiteMarca = (Get-Date).AddDays(1)
+        $comData = [bool]$script:usaIncremental
         $con = Abrir-Conexao
         try {
             $cmd = $con.CreateCommand()
             $cmd.CommandTimeout = 300
-            $sql = "SELECT $($colunas -join ', ') FROM $view"
+            $sql = "SELECT $($colunas -join ', ')$(if ($comData) { ', data_alteracao' }) FROM $view"
             if ($null -ne $desde) {
                 $sql += ' WHERE data_alteracao >= ?'
                 $p = New-Object System.Data.Odbc.OdbcParameter('desde', [System.Data.Odbc.OdbcType]::DateTime)
-                $p.Value = $desde
+                # Segundo inteiro, arredondado para baixo: o driver do SQL Server recusa frações de
+                # segundo no parâmetro ("Estouro no campo Datetime"); para baixo só relê, nunca perde.
+                $p.Value = ([datetime]$desde).AddTicks(-(([datetime]$desde).Ticks % [TimeSpan]::TicksPerSecond))
                 $null = $cmd.Parameters.Add($p)
             }
             $cmd.CommandText = $sql
@@ -705,6 +719,11 @@ function Executar-ModoBanco {
                 $l = [ordered]@{}
                 for ($i = 0; $i -lt $colunas.Count; $i++) { $l[$colunas[$i]] = Valor ($leitor.GetValue($i)) }
                 if ($l['codigo_barras']) { $linhas[$l['codigo_barras']] = $l }
+                if ($comData) {
+                    $d = $leitor.GetValue($colunas.Count)
+                    if (-not ($d -is [datetime])) { $t = [datetime]::MinValue; $d = if ([datetime]::TryParse([string]$d, $inv, [Globalization.DateTimeStyles]::None, [ref]$t)) { $t } else { $null } }
+                    if ($null -ne $d -and $d -le $limiteMarca -and ($null -eq $script:maiorLida -or $d -gt $script:maiorLida)) { $script:maiorLida = $d }
+                }
             }
             $leitor.Close()
         } finally { $con.Close() }
@@ -766,7 +785,9 @@ function Executar-ModoBanco {
         $lidas = Ler-View $null
         $foto.Clear(); $internoDe.Clear()
         foreach ($k in $lidas.Keys) { $foto[$k] = Json-Linha $lidas[$k]; $internoDe[$k] = (Interno-De $lidas[$k]) }
-        Registrar ("Leitura COMPLETA da VIEW {0}: {1} linha(s) em {2:N1} s." -f $view, $foto.Count, ((Get-Date) - $inicio).TotalSeconds)
+        $script:marcaBanco = $script:maiorLida
+        Registrar ("Leitura COMPLETA da VIEW {0}: {1} linha(s) em {2:N1} s.{3}" -f $view, $foto.Count, ((Get-Date) - $inicio).TotalSeconds,
+            $(if ($script:marcaBanco) { " Última alteração no banco: {0:dd/MM HH:mm:ss} (relógio do banco)." -f $script:marcaBanco } else { '' }))
         return @{ hash = (Hash-Foto); inicio = $inicio }
     }
 
@@ -776,7 +797,11 @@ function Executar-ModoBanco {
         $inicio = Get-Date
         $mudados = New-Object System.Collections.Generic.List[string]
         $excluidos = New-Object System.Collections.Generic.List[string]
+        # Com marca d'água, o "desde" vem do relógio do banco; sem ela (VIEW com data_alteracao
+        # vazia), do relógio deste computador, como antes.
+        if ($script:usaIncremental -and $script:marcaBanco) { $desde = $script:marcaBanco.AddMinutes(-$folgaMin) }
         $lidas = if ($script:usaIncremental) { Ler-View $desde } else { Ler-View $null }
+        if ($script:maiorLida -and (-not $script:marcaBanco -or $script:maiorLida -gt $script:marcaBanco)) { $script:marcaBanco = $script:maiorLida }
         foreach ($k in $lidas.Keys) {
             $j = Json-Linha $lidas[$k]
             if ($foto[$k] -ne $j) { $foto[$k] = $j; $internoDe[$k] = (Interno-De $lidas[$k]); $mudados.Add($k) }
@@ -799,7 +824,7 @@ function Executar-ModoBanco {
             }
         }
         Registrar ("Leitura incremental{0}: {1} linha(s) lida(s), {2} mudada(s), {3} removida(s) em {4:N1} s." -f
-            $(if ($script:usaIncremental) { " desde {0:dd/MM HH:mm}" -f $desde } else { ' (VIEW inteira, sem data_alteracao)' }),
+            $(if ($script:usaIncremental) { " desde {0:dd/MM HH:mm:ss}{1}" -f $desde, $(if ($script:marcaBanco) { ' (relógio do banco)' } else { '' }) } else { ' (VIEW inteira, sem data_alteracao)' }),
             $lidas.Count, $mudados.Count, $excluidos.Count, ((Get-Date) - $inicio).TotalSeconds)
         return @{ mudados = $mudados; excluidos = $excluidos; inicio = $inicio }
     }

@@ -22,6 +22,10 @@ tem SELECT nela. Nada é gravado no ERP e nenhuma porta é aberta.
 - **Leitura incremental:** a cada 5 minutos (configurável), só das linhas com `data_alteracao`
   recente. Sem essa coluna, o agente lê a VIEW inteira e compara com a última leitura (envia só o
   que mudou). O agente descobre sozinho quais colunas a VIEW tem; não há nada a configurar.
+  A leitura incremental segue o **relógio do banco** (a maior `data_alteracao` já lida), então o
+  fuso horário do servidor do banco (ex.: UTC) e o do computador do agente podem ser diferentes.
+- **Testado em laboratório** com MySQL 8, SQL Server 2022 e PostgreSQL 16 (27 mil códigos de
+  barras, acentos, ofertas, produto fora de linha e de volta).
 - **Envio:** pacotes JSON compactados, por HTTPS, **só de saída**, para um único endereço.
 
 ## 2. O que a TI prepara
