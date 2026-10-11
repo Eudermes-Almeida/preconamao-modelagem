@@ -5,7 +5,7 @@ $pasta = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nomeTarefa = 'SimplificaCompras-AgenteBanco'
 $tarefa = Get-ScheduledTask -TaskName $nomeTarefa -ErrorAction SilentlyContinue
 if (-not $tarefa) {
-    Write-Host 'O agente do conector de banco não está instalado nesta máquina.'
+    Write-Host 'O agente da integração via VIEW (banco de dados) não está instalado nesta máquina.'
     return
 }
 Stop-ScheduledTask -TaskName $nomeTarefa -ErrorAction SilentlyContinue
@@ -14,4 +14,4 @@ Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
     Where-Object { $_.CommandLine -like "*$pasta*agente.ps1*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Unregister-ScheduledTask -TaskName $nomeTarefa -Confirm:$false
-Write-Host "Agente do conector de banco removido (tarefa '$nomeTarefa' apagada)." -ForegroundColor Green
+Write-Host "Agente da integração via VIEW removido (tarefa '$nomeTarefa' apagada)." -ForegroundColor Green

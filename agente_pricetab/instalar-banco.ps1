@@ -55,7 +55,7 @@ function Parte([string]$conexao, [string]$nome) {
 }
 
 Write-Host ''
-Write-Host '=== Simplifica Compras - instalação do agente do conector de banco ===' -ForegroundColor Cyan
+Write-Host '=== Simplifica Compras - instalação do agente da integração via VIEW (banco de dados) ===' -ForegroundColor Cyan
 Write-Host 'O agente lê a VIEW vw_simplifica_precos no banco do ERP DENTRO da rede da loja, com um usuário'
 Write-Host 'que só tem SELECT nela, e só envia preços para o Simplifica Compras (conexão de saída).'
 Write-Host 'Nenhuma porta é aberta nesta máquina e nada é gravado no ERP.'

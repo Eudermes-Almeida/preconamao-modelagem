@@ -1,4 +1,4 @@
-# Simplifica Compras — Conector de banco de dados: contrato da VIEW
+# Simplifica Compras — Integração via VIEW (banco de dados): contrato da VIEW
 
 Para a equipe de TI do supermercado. Este documento descreve **o único objeto** que o
 Simplifica Compras lê no banco de dados do ERP.

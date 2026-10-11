@@ -1,4 +1,4 @@
-# Simplifica Compras — Agente do conector de banco de dados
+# Simplifica Compras — Agente da integração via VIEW (banco de dados)
 
 **Guia para a equipe de TI do supermercado.**
 

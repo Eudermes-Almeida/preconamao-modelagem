@@ -219,7 +219,7 @@ echo
 echo 'De onde vêm os preços da loja?'
 echo '  1 = arquivo PRICETAB.TXT (gerado pelo sistema da loja para os terminais de consulta)'
 echo '  2 = API da RPInfo (RP Services) na rede da loja'
-echo '  3 = banco de dados do ERP (VIEW vw_simplifica_precos, por ODBC)'
+echo '  3 = integração via VIEW no banco de dados do ERP (vw_simplifica_precos, somente leitura, por ODBC)'
 case "${ANT[modo]:-}" in rpinfo) S=2 ;; banco) S=3 ;; arquivo) S=1 ;; *) S=3 ;; esac
 case "$(perguntar 'Opção' "$S")" in 1) MODO=arquivo ;; 2) MODO=rpinfo ;; 3) MODO=banco ;; *) vermelho 'Opção inválida.'; exit 1 ;; esac
 

@@ -12,7 +12,7 @@ preços e só faz conexões **de saída**. Nada é gravado no sistema da loja e 
 |---|---|
 | **arquivo** | o `PRICETAB.TXT` gerado pelo sistema da loja para os terminais de consulta |
 | **rpinfo** | a API da RPInfo (RP Services) na rede da loja |
-| **banco** | a VIEW `vw_simplifica_precos` no banco do ERP, por ODBC (ver `LEIA-ME-TI-BANCO.md` e `CONTRATO_VIEW.md`) |
+| **banco** (integração via VIEW) | a VIEW `vw_simplifica_precos` no banco de dados do ERP, somente leitura, por ODBC (ver `LEIA-ME-TI-BANCO.md` e `CONTRATO_VIEW.md`) |
 
 ---
 
@@ -24,7 +24,7 @@ preços e só faz conexões **de saída**. Nada é gravado no sistema da loja e 
 - **PowerShell 7** (Microsoft, gratuito). No Ubuntu e no Debian o instalador oferece instalar do
   repositório oficial da Microsoft; nas outras distribuições, instale antes conforme
   <https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux>.
-- **Modo banco:** `unixODBC` + o **driver ODBC oficial** do banco do ERP. Testados:
+- **Integração via VIEW (modo banco):** `unixODBC` + o **driver ODBC oficial** do banco do ERP. Testados:
 
   | Banco | Driver (nome que aparece no instalador) | Como instalar (Ubuntu/Debian) |
   |---|---|---|
@@ -33,7 +33,7 @@ preços e só faz conexões **de saída**. Nada é gravado no sistema da loja e 
   | MySQL | `MySQL ODBC 8.0 Unicode Driver` | MySQL Connector/ODBC (dev.mysql.com) |
 
 - **Saída HTTPS (porta 443)** para o endereço do servidor Simplifica Compras. Nenhuma regra de
-  entrada é necessária. Modo banco/rpinfo: acesso ao banco/API pela rede interna.
+  entrada é necessária. Integração via VIEW ou API: acesso ao banco/API pela rede interna.
 - Recursos: memória de ~350 MB numa loja de 27 mil códigos de barras (o agente guarda a última
   leitura para mandar só o que mudou); CPU só durante as leituras (completa de 27 mil em ~15 s).
 
@@ -55,9 +55,9 @@ preços e só faz conexões **de saída**. Nada é gravado no sistema da loja e 
 | Servidor Simplifica Compras | informado pela Simplifica Compras |
 | **arquivo:** pasta e nome do arquivo | `/srv/pricetab`, `PRICETAB.TXT` |
 | **rpinfo:** endereço da API, usuário, CNPJ | `http://10.0.0.8:9000`, `simplifica`, `11222333000181` |
-| **banco:** driver, servidor, porta, banco | número na lista, `10.0.0.5`, `5432`, `erp` |
-| **banco (SQL Server):** certificado próprio/autoassinado | `s` (o comum na rede interna) |
-| **banco:** usuário e nome da VIEW | `simplifica_leitura`, `vw_simplifica_precos` |
+| **VIEW (banco):** driver, servidor, porta, banco | número na lista, `10.0.0.5`, `5432`, `erp` |
+| **VIEW (SQL Server):** certificado próprio/autoassinado | `s` (o comum na rede interna) |
+| **VIEW (banco):** usuário e nome da VIEW | `simplifica_leitura`, `vw_simplifica_precos` |
 | Intervalo de leitura e horário da completa | `5` e `12:00` |
 | Chave da loja e senha (do banco ou da API) | digitadas/coladas **sem aparecer na tela** |
 
@@ -88,8 +88,8 @@ Não há atualização automática: toda versão nova é entregue à TI e instal
 
 ## 4. Segurança
 
-- **Somente leitura e só o necessário:** no modo banco, só as colunas do contrato da VIEW; no modo
-  rpinfo, só código, descrição, preços, oferta vigente, departamento, balança e ativo. Custo,
+- **Somente leitura e só o necessário:** na integração via VIEW, só as colunas do contrato da
+  VIEW; na API RPInfo, só código, descrição, preços, oferta vigente, departamento, balança e ativo. Custo,
   margem, estoque, fornecedor, dados fiscais e de clientes nunca saem da loja.
 - **Sem portas abertas:** o agente não escuta conexões e não aceita comandos de fora. As respostas
   do servidor são só sinais fixos ("envie de novo", "faça uma leitura completa").
