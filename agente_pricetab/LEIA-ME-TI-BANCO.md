@@ -103,6 +103,10 @@ ligado no horário de funcionamento, com:
 - **Travas no servidor:** pacote que tiraria mais de 20% dos produtos ou derrubaria o preço de
   muitos produtos de uma vez fica retido para conferência.
 - **Um agente por loja:** outro computador com a mesma chave é recusado até a liberação.
+- **Revogar o acesso na hora:** a Simplifica Compras desativa a chave da loja no painel e, a partir
+  daí, o servidor recusa tudo o que o agente enviar (o log mostra "Chave da loja desativada no
+  painel"). Para voltar, ou se a chave vazar, uma chave nova é gerada no painel e entregue à TI,
+  que reconfigura o agente; a antiga deixa de valer.
 
 ## 5. Operação
 
@@ -129,6 +133,9 @@ powershell -ExecutionPolicy Bypass -File agente.ps1 -TestarConexao
 
 ## 6. Remoção
 
-Execute **`desinstalar-banco.cmd`**: ele para o agente e apaga a tarefa. A pasta (com o
-`config.json`, os logs e a auditoria) fica; apague-a à mão se quiser. Depois, remova também o
-usuário de banco `simplifica_leitura`.
+Clique com o botão direito em **`desinstalar-banco.cmd`** → "Executar como administrador" e
+confirme com `s`. Ele para o agente, apaga a tarefa e **apaga a pasta do agente**, inclusive o
+`config.json` com a chave da loja e a senha do banco, a fila, a auditoria e os logs (como o
+`desinstalar.sh` do Linux). Pode ser executado da própria pasta ou de outra cópia (ex.: o pendrive):
+ele apaga a pasta onde o agente foi instalado. Depois, remova também o usuário de banco
+`simplifica_leitura`.

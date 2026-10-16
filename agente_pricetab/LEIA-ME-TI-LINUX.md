@@ -104,6 +104,10 @@ Não há atualização automática: toda versão nova é entregue à TI e instal
 - **Travas no servidor:** pacote que tiraria mais de 20% dos produtos ou derrubaria o preço de muitos
   produtos de uma vez fica retido para conferência.
 - **Um agente por loja:** outro servidor com a mesma chave é recusado até a liberação.
+- **Revogar o acesso na hora:** a Simplifica Compras desativa a chave da loja no painel e, a partir
+  daí, o servidor recusa tudo o que o agente enviar (o log mostra "Chave da loja desativada no
+  painel"). Para voltar, ou se a chave vazar, uma chave nova é gerada no painel e entregue à TI,
+  que reconfigura o agente; a antiga deixa de valer.
 
 **Aviso no journal ao iniciar (normal):** o PowerShell grava no log do sistema, como *warning*
 (`ScriptBlock_Compile_Detail`), o texto de scripts que usam criptografia, compactação ou Base64 — o

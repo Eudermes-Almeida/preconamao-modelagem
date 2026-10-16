@@ -32,8 +32,15 @@ alimenta os terminais Gertec) e, quando o arquivo muda, envia uma cópia para o 
 Depois de formatar a máquina, basta repetir os passos acima.
 
 ## Remoção
-Duplo clique em **desinstalar.cmd**: a tarefa agendada é parada e apagada. A pasta pode ser apagada
-em seguida.
+Clique com o botão direito em **desinstalar.cmd** → "Executar como administrador" e confirme com
+`s`: a tarefa agendada é parada e apagada, e a pasta do agente também é apagada, inclusive o
+`config.json` com a chave da loja e os logs.
+
+## Revogar o acesso
+A Simplifica Compras desativa a chave da loja no painel e, a partir daí, o servidor recusa tudo o
+que o agente enviar (o log mostra "Chave da loja desativada no painel"). Para voltar, ou se a chave
+vazar, uma chave nova é gerada no painel e entregue à TI, que reconfigura o agente; a antiga deixa
+de valer.
 
 ## Requisitos
 - Windows 8 / Server 2012 ou mais novo (PowerShell 5.1, já incluído no Windows).
