@@ -11,6 +11,9 @@
 # administrador, roda quando este usuário entra no Windows.
 # Não mexe em outras tarefas do Simplifica Compras (agente do PRICETAB, agente RPInfo).
 
+# -ContaSystem: exceção documentada; a tarefa roda como SYSTEM em vez da LOCAL SERVICE.
+param([switch]$ContaSystem)
+
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $pasta = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -61,6 +64,37 @@ Write-Host 'que só tem SELECT nela, e só envia preços para o Simplifica Compr
 Write-Host 'Nenhuma porta é aberta nesta máquina e nada é gravado no ERP.'
 Write-Host ''
 
+# Conta da tarefa quando instalado como administrador: LOCAL SERVICE, conta de serviço do próprio
+# Windows, SEM privilégios de administrador e sem senha (nada é criado no computador); ela só grava
+# na pasta do agente. -ContaSystem é a exceção documentada (PRICETAB numa pasta de REDE, que a LOCAL
+# SERVICE não lê): volta a tarefa para SYSTEM. Sempre pelo SID S-1-5-19: o nome muda com o idioma do
+# Windows ("SERVIÇO LOCAL" em português).
+function Conta-ServicoLocal { (New-Object Security.Principal.SecurityIdentifier 'S-1-5-19').Translate([Security.Principal.NTAccount]).Value }
+
+function Liberar-PastaAgente([string]$caminho) {
+    & icacls $caminho /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Não foi possível dar à conta LOCAL SERVICE acesso à pasta do agente ($caminho)." }
+}
+
+# Modo PRICETAB: a LOCAL SERVICE precisa LER a pasta do arquivo. Pasta de rede ela não lê: devolve
+# $false. Pasta local sem leitura para ela (nem para Todos/Usuários/SERVICE): libera só a leitura.
+function Liberar-LeituraPricetab([string]$pastaPricetab) {
+    if ($pastaPricetab -like '\\*') { return $false }
+    if (-not (Test-Path $pastaPricetab)) { return $true }
+    $leitores = 'S-1-5-19', 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-6'
+    $temLeitura = (Get-Acl $pastaPricetab).Access | Where-Object {
+        $sid = try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { '' }
+        $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -and $leitores -contains $sid
+    }
+    if (-not $temLeitura) {
+        & icacls $pastaPricetab /grant '*S-1-5-19:(OI)(CI)RX' | Out-Null
+        Write-Host "Leitura da pasta do PRICETAB ($pastaPricetab) liberada para a conta LOCAL SERVICE (só leitura)."
+    }
+    return $true
+}
+
+$ehAdministrador = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
 # Já instalado (a tarefa existe e a pasta dela tem config.json): oferece ATUALIZAR só o programa,
 # como o instalar.sh do Linux. A pasta instalada é a da tarefa: este instalador pode estar rodando
 # da pasta da versão nova (ex.: o pendrive) - aí o programa novo é copiado para a pasta instalada.
@@ -86,6 +120,25 @@ if ($pastaInstalada -and (Test-Path (Join-Path $pastaInstalada 'config.json')) -
             Get-ChildItem $PSScriptRoot -File | Where-Object { $_.Name -notin 'config.json', 'config.novo.json', 'estado.json' } |
                 Copy-Item -Destination $pastaInstalada -Force
             Write-Host "Programa da versão $versaoPacote copiado para $pastaInstalada."
+        }
+        # Chave em texto aberto (agente do PRICETAB até a 2.5): passa a ficar protegida pelo Windows.
+        $cfgChave = Get-Content (Join-Path $pastaInstalada 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $proteger = Join-Path $PSScriptRoot 'proteger.ps1'
+        if ($cfgChave.chave -and -not $cfgChave.chaveProtegida -and (Test-Path $proteger)) {
+            & $proteger -Campo chave -Valor $cfgChave.chave -Config (Join-Path $pastaInstalada 'config.json') | Out-Null
+            Write-Host 'A chave da loja, que estava em texto aberto no config.json, foi protegida pelo Windows.'
+        }
+        # Tarefa antiga como SYSTEM (versões até a 2.5): passa para a LOCAL SERVICE, sem privilégios.
+        if ($ehAdministrador -and -not $ContaSystem -and $tarefaInstalada.Principal.UserId -match 'SYSTEM|SISTEMA') {
+            $cfgInstalado = Get-Content (Join-Path $pastaInstalada 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $pricetabLocal = if ((-not $cfgInstalado.modo -or $cfgInstalado.modo -eq 'arquivo') -and $cfgInstalado.pasta) { Liberar-LeituraPricetab $cfgInstalado.pasta } else { $true }
+            if ($pricetabLocal) {
+                Liberar-PastaAgente $pastaInstalada
+                Set-ScheduledTask -TaskName $nomeTarefa -Principal (New-ScheduledTaskPrincipal -UserId (Conta-ServicoLocal) -LogonType ServiceAccount -RunLevel Limited) | Out-Null
+                Write-Host 'A tarefa passou a rodar com a conta LOCAL SERVICE (sem privilégios de administrador).'
+            } else {
+                Write-Host 'O PRICETAB está numa pasta de rede: a tarefa continua com a conta SYSTEM.' -ForegroundColor Yellow
+            }
         }
         $inicio = Get-Date
         Start-ScheduledTask -TaskName $nomeTarefa
@@ -201,8 +254,14 @@ $opcoes = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -R
     -MultipleInstances IgnoreNew
 if ($administrador) {
     $gatilho = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $modo = 'ao ligar o Windows (conta SYSTEM)'
+    if ($ContaSystem) {
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $modo = 'ao ligar o Windows (conta SYSTEM, pedida com -ContaSystem)'
+    } else {
+        Liberar-PastaAgente $pasta
+        $principal = New-ScheduledTaskPrincipal -UserId (Conta-ServicoLocal) -LogonType ServiceAccount -RunLevel Limited
+        $modo = 'ao ligar o Windows (conta LOCAL SERVICE, sem privilégios de administrador)'
+    }
 } else {
     $usuario = "$env:USERDOMAIN\$env:USERNAME"
     $gatilho = New-ScheduledTaskTrigger -AtLogOn -User $usuario

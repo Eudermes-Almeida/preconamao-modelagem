@@ -26,7 +26,7 @@ if ((Test-Path $propriedades) -and -not ((Get-Content $propriedades -Raw) -match
 
 # Arquivos de cada pasta (iguais ao pendrive oficial).
 $windows = @{
-    'agente_pricetab' = 'LEIA-ME-TI.md', 'agente.ps1', 'config.exemplo.json', 'desinstalar.cmd', 'desinstalar.ps1', 'instalar.cmd', 'instalar.ps1'
+    'agente_pricetab' = 'LEIA-ME-TI.md', 'agente.ps1', 'config.exemplo.json', 'desinstalar.cmd', 'desinstalar.ps1', 'instalar.cmd', 'instalar.ps1', 'proteger.ps1'
     'agente_rpinfo'   = 'agente.ps1', 'config.exemplo.rpinfo.json', 'desinstalar-rpinfo.cmd', 'desinstalar-rpinfo.ps1', 'instalar-rpinfo.cmd', 'instalar-rpinfo.ps1', 'proteger.ps1'
     'agente_banco'    = 'CONTRATO_VIEW.md', 'LEIA-ME-TI-BANCO.md', 'agente.ps1', 'config.exemplo.banco.json', 'desinstalar-banco.cmd', 'desinstalar-banco.ps1', 'instalar-banco.cmd', 'instalar-banco.ps1', 'proteger.ps1'
 }

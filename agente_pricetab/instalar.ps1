@@ -1,5 +1,6 @@
 ﻿# Instala o agente Simplifica Compras nesta máquina (PC/servidor da loja).
-#   1. Pergunta a chave da loja e a pasta do PRICETAB (Enter aceita o valor sugerido).
+#   1. Pergunta a chave da loja e a pasta do PRICETAB (Enter aceita o valor sugerido). A chave é
+#      gravada PROTEGIDA pelo Windows (DPAPI da máquina, proteger.ps1): só este computador lê.
 #   2. Testa a conexão com a API.
 #   3. Registra a tarefa "SimplificaCompras-AgentePricetab", que inicia junto com o Windows.
 #   4. Inicia o agente e mostra o resultado do primeiro envio.
@@ -12,7 +13,9 @@ param(
     [string]$Chave,
     [string]$Pasta,
     [string]$Arquivo,
-    [switch]$SemPerguntas
+    [switch]$SemPerguntas,
+    # Exceção: PRICETAB numa pasta de rede (a conta LOCAL SERVICE não lê). Roda como SYSTEM.
+    [switch]$ContaSystem
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +36,37 @@ function Perguntar([string]$texto, [string]$sugestao, [switch]$Segredo) {
 Write-Host ''
 Write-Host '=== Simplifica Compras - instalação do agente do PRICETAB ===' -ForegroundColor Cyan
 Write-Host ''
+
+# Conta da tarefa quando instalado como administrador: LOCAL SERVICE, conta de serviço do próprio
+# Windows, SEM privilégios de administrador e sem senha (nada é criado no computador); ela só grava
+# na pasta do agente. -ContaSystem é a exceção documentada (PRICETAB numa pasta de REDE, que a LOCAL
+# SERVICE não lê): volta a tarefa para SYSTEM. Sempre pelo SID S-1-5-19: o nome muda com o idioma do
+# Windows ("SERVIÇO LOCAL" em português).
+function Conta-ServicoLocal { (New-Object Security.Principal.SecurityIdentifier 'S-1-5-19').Translate([Security.Principal.NTAccount]).Value }
+
+function Liberar-PastaAgente([string]$caminho) {
+    & icacls $caminho /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Não foi possível dar à conta LOCAL SERVICE acesso à pasta do agente ($caminho)." }
+}
+
+# Modo PRICETAB: a LOCAL SERVICE precisa LER a pasta do arquivo. Pasta de rede ela não lê: devolve
+# $false. Pasta local sem leitura para ela (nem para Todos/Usuários/SERVICE): libera só a leitura.
+function Liberar-LeituraPricetab([string]$pastaPricetab) {
+    if ($pastaPricetab -like '\\*') { return $false }
+    if (-not (Test-Path $pastaPricetab)) { return $true }
+    $leitores = 'S-1-5-19', 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-6'
+    $temLeitura = (Get-Acl $pastaPricetab).Access | Where-Object {
+        $sid = try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { '' }
+        $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -and $leitores -contains $sid
+    }
+    if (-not $temLeitura) {
+        & icacls $pastaPricetab /grant '*S-1-5-19:(OI)(CI)RX' | Out-Null
+        Write-Host "Leitura da pasta do PRICETAB ($pastaPricetab) liberada para a conta LOCAL SERVICE (só leitura)."
+    }
+    return $true
+}
+
+$ehAdministrador = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 # Já instalado (a tarefa existe e a pasta dela tem config.json): oferece ATUALIZAR só o programa,
 # como o instalar.sh do Linux. A pasta instalada é a da tarefa: este instalador pode estar rodando
@@ -59,6 +93,25 @@ if ($pastaInstalada -and (Test-Path (Join-Path $pastaInstalada 'config.json')) -
             Get-ChildItem $PSScriptRoot -File | Where-Object { $_.Name -notin 'config.json', 'config.novo.json', 'estado.json' } |
                 Copy-Item -Destination $pastaInstalada -Force
             Write-Host "Programa da versão $versaoPacote copiado para $pastaInstalada."
+        }
+        # Chave em texto aberto (agente do PRICETAB até a 2.5): passa a ficar protegida pelo Windows.
+        $cfgChave = Get-Content (Join-Path $pastaInstalada 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $proteger = Join-Path $PSScriptRoot 'proteger.ps1'
+        if ($cfgChave.chave -and -not $cfgChave.chaveProtegida -and (Test-Path $proteger)) {
+            & $proteger -Campo chave -Valor $cfgChave.chave -Config (Join-Path $pastaInstalada 'config.json') | Out-Null
+            Write-Host 'A chave da loja, que estava em texto aberto no config.json, foi protegida pelo Windows.'
+        }
+        # Tarefa antiga como SYSTEM (versões até a 2.5): passa para a LOCAL SERVICE, sem privilégios.
+        if ($ehAdministrador -and -not $ContaSystem -and $tarefaInstalada.Principal.UserId -match 'SYSTEM|SISTEMA') {
+            $cfgInstalado = Get-Content (Join-Path $pastaInstalada 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $pricetabLocal = if ((-not $cfgInstalado.modo -or $cfgInstalado.modo -eq 'arquivo') -and $cfgInstalado.pasta) { Liberar-LeituraPricetab $cfgInstalado.pasta } else { $true }
+            if ($pricetabLocal) {
+                Liberar-PastaAgente $pastaInstalada
+                Set-ScheduledTask -TaskName $nomeTarefa -Principal (New-ScheduledTaskPrincipal -UserId (Conta-ServicoLocal) -LogonType ServiceAccount -RunLevel Limited) | Out-Null
+                Write-Host 'A tarefa passou a rodar com a conta LOCAL SERVICE (sem privilégios de administrador).'
+            } else {
+                Write-Host 'O PRICETAB está numa pasta de rede: a tarefa continua com a conta SYSTEM.' -ForegroundColor Yellow
+            }
         }
         $inicio = Get-Date
         Start-ScheduledTask -TaskName $nomeTarefa
@@ -87,9 +140,17 @@ if ($pastaInstalada -and (Test-Path (Join-Path $pastaInstalada 'config.json')) -
 
 
 $base = if (Test-Path $caminhoConfig) { Get-Content $caminhoConfig -Raw -Encoding UTF8 | ConvertFrom-Json } else { Get-Content $caminhoModelo -Raw -Encoding UTF8 | ConvertFrom-Json }
+# Chave já protegida (reconfiguração): o Enter mantém; para o teste de conexão, decifra aqui (DPAPI da
+# máquina: só este computador consegue).
+$chaveAtual = $base.chave
+if ($base.chaveProtegida -like 'dpapi:*') {
+    Add-Type -AssemblyName System.Security
+    $chaveAtual = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect(
+        [Convert]::FromBase64String($base.chaveProtegida.Substring(6)), $null, [Security.Cryptography.DataProtectionScope]::LocalMachine))
+}
 $config = [ordered]@{
     url                   = if ($Url) { $Url } else { Perguntar 'Endereço da API' $base.url }
-    chave                 = if ($Chave) { $Chave } else { Perguntar 'Chave da loja (fornecida pela Simplifica Compras)' $base.chave -Segredo }
+    chave                 = if ($Chave) { $Chave } else { Perguntar 'Chave da loja (fornecida pela Simplifica Compras)' $chaveAtual -Segredo }
     pasta                 = if ($Pasta) { $Pasta } else { Perguntar 'Pasta onde fica o PRICETAB' $base.pasta }
     arquivo               = if ($Arquivo) { $Arquivo } else { Perguntar 'Nome do arquivo' $base.arquivo }
     intervaloSinalMinutos = if ($base.intervaloSinalMinutos) { [int]$base.intervaloSinalMinutos } else { 5 }
@@ -113,6 +174,9 @@ try {
 }
 
 $config | ConvertTo-Json | Set-Content $caminhoConfig -Encoding UTF8
+# A chave não fica em texto aberto: o proteger.ps1 cifra pelo Windows e apaga o texto aberto.
+& (Join-Path $PSScriptRoot 'proteger.ps1') -Campo chave -Valor $config.chave -Config $caminhoConfig | Out-Null
+Write-Host 'Configuração gravada; chave protegida pelo Windows (só este computador lê).' -ForegroundColor Green
 
 $administrador = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $existente = Get-ScheduledTask -TaskName $nomeTarefa -ErrorAction SilentlyContinue
@@ -130,8 +194,17 @@ $opcoes = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -R
     -MultipleInstances IgnoreNew
 if ($administrador) {
     $gatilho = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $modo = 'ao ligar o Windows (conta SYSTEM)'
+    if ($ContaSystem) {
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $modo = 'ao ligar o Windows (conta SYSTEM, pedida com -ContaSystem)'
+    } else {
+        if (-not (Liberar-LeituraPricetab $config.pasta)) {
+            throw "A pasta do PRICETAB ($($config.pasta)) é de rede, e a conta LOCAL SERVICE não lê pastas de rede. Copie o arquivo para uma pasta local OU instale com: instalar.ps1 -ContaSystem (e libere a pasta de rede para a conta do computador)."
+        }
+        Liberar-PastaAgente $PSScriptRoot
+        $principal = New-ScheduledTaskPrincipal -UserId (Conta-ServicoLocal) -LogonType ServiceAccount -RunLevel Limited
+        $modo = 'ao ligar o Windows (conta LOCAL SERVICE, sem privilégios de administrador)'
+    }
 } else {
     $usuario = "$env:USERDOMAIN\$env:USERNAME"
     $gatilho = New-ScheduledTaskTrigger -AtLogOn -User $usuario

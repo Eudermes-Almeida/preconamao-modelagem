@@ -13,6 +13,8 @@ alimenta os terminais Gertec) e, quando o arquivo muda, envia uma cópia para o 
   loja está conectada. Sem esse sinal, o aplicativo deixa de mostrar preços e pede ao cliente que
   consulte o terminal da loja: um preço desatualizado nunca é exibido.
 - Grava um log diário em `logs\` (guardado por 30 dias).
+- Guarda a chave da loja **cifrada pelo Windows** (DPAPI, escopo da máquina) no `config.json`: só
+  este computador consegue lê-la, e ela nunca aparece no log.
 
 ## O que ele NÃO faz
 - Não altera, move nem apaga nenhum arquivo da loja.
@@ -23,8 +25,13 @@ alimenta os terminais Gertec) e, quando o arquivo muda, envia uma cópia para o 
 ## Instalação (cerca de 5 minutos)
 1. Copie a pasta `agente_pricetab` para a máquina onde o PRICETAB.TXT é gerado.
 2. Clique com o botão direito em **instalar.cmd** > **Executar como administrador**.
-   (Como administrador, o agente inicia junto com o Windows, sem ninguém logado. Sem
+   (Como administrador, o agente inicia junto com o Windows, sem ninguém logado, na conta
+   **LOCAL SERVICE** do Windows: sem privilégios de administrador, sem senha e sem criar usuário.
+   Ela só ganha permissão de gravar na pasta do agente e de ler a pasta do PRICETAB. Sem
    administrador, ele inicia quando o usuário atual entra no Windows.)
+   **PRICETAB numa pasta de rede** (`\\servidor\...`): a LOCAL SERVICE não lê pasta de rede. Copie
+   o arquivo para uma pasta local ou instale com `instalar.cmd -ContaSystem` (a tarefa roda como
+   SYSTEM; libere a pasta de rede para a conta do computador).
 3. Informe a **chave da loja** (fornecida pela Simplifica Compras) e a **pasta do PRICETAB**.
 4. O instalador testa a conexão, registra a tarefa agendada **SimplificaCompras-AgentePricetab**
    e mostra o resultado do primeiro envio.
@@ -68,6 +75,7 @@ de valer.
 | `agente.ps1` | O agente (texto; pode ser lido e auditado) |
 | `instalar.cmd` / `instalar.ps1` | Instalação |
 | `desinstalar.cmd` / `desinstalar.ps1` | Remoção |
-| `config.json` | Criado na instalação: endereço da API, chave da loja, pasta do PRICETAB |
+| `proteger.ps1` | Cifra a chave da loja pelo Windows (usado pelo instalador) |
+| `config.json` | Criado na instalação: endereço da API, chave da loja (cifrada), pasta do PRICETAB |
 | `estado.json` | Controle interno (hash do último arquivo enviado) |
 | `logs\agente-AAAA-MM-DD.log` | Registro de envios e falhas |

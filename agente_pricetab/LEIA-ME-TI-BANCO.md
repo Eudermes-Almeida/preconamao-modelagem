@@ -87,7 +87,8 @@ ligado no horário de funcionamento, com:
 
 4. O instalador **testa a VIEW e o servidor antes de registrar qualquer coisa**. Se tudo der
    certo, ele registra a tarefa `SimplificaCompras-AgenteBanco` (inicia com o Windows, na conta
-   SYSTEM, e é reiniciada pelo Windows se parar) e mostra a primeira leitura completa.
+   **LOCAL SERVICE**, sem privilégios de administrador, e é reiniciada pelo Windows se parar) e
+   mostra a primeira leitura completa.
 
 ## 4. Segurança
 
@@ -96,6 +97,9 @@ ligado no horário de funcionamento, com:
 - **Sem portas abertas:** o agente não escuta conexões e não aceita comandos de fora. As respostas
   do servidor são só sinais fixos ("envie de novo", "faça uma leitura completa").
 - **Sem atualização automática:** toda versão nova é entregue à TI e instalada por ela.
+- **Conta sem privilégios:** instalado como administrador, o agente roda na conta **LOCAL SERVICE**
+  do próprio Windows ("SERVIÇO LOCAL" em português): sem privilégios de administrador, sem senha e
+  sem criar usuário. Ela só tem permissão de gravar na pasta do agente.
 - **Credenciais cifradas:** a chave da loja e a senha do banco ficam no `config.json` cifradas pelo
   Windows (DPAPI, escopo da máquina). Só este computador consegue lê-las, e elas nunca aparecem no
   log.
