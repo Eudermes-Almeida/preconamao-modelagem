@@ -3,6 +3,7 @@
 #     pendrive_agente_windows\{agente_pricetab, agente_rpinfo, agente_banco}  (mesma estrutura do SUPER_PENDRIVER)
 #     pendrive_agente_linux\{agente_pricetab, agente_rpinfo, agente_banco}
 #     NOVIDADES-<versão>.md   (o que mudou, se precisa reconfigurar, segurança, compatibilidade)
+#     MANUAL-TECNICO-TI.md    (manual geral da TI: integrações, segurança, operação, versão, revogação)
 #     SHA256.txt              (resumo SHA-256 de cada arquivo, para a TI conferir)
 #   e o SHA-256 do próprio zip, para mandar à TI por outro canal (ex.: no corpo do e-mail).
 # A versão vem do agente.ps1 ($versaoAgente); exige novidades\NOVIDADES-<versão>.md.
@@ -46,6 +47,7 @@ foreach ($pasta in 'agente_pricetab', 'agente_rpinfo', 'agente_banco') {
     $linux | ForEach-Object { Copy-Item (Join-Path $origem $_) $destino }
 }
 Copy-Item $novidades $montagem
+Copy-Item (Join-Path $origem 'MANUAL-TECNICO-TI.md') $montagem
 
 # SHA256.txt: um arquivo por linha, no formato do sha256sum (a TI confere com sha256sum -c no Linux
 # ou comparando com Get-FileHash no Windows).
@@ -67,6 +69,7 @@ if ($AtualizarPendrive) {
     foreach ($sub in 'pendrive_agente_windows', 'pendrive_agente_linux') {
         Copy-Item (Join-Path $montagem "$sub\*") (Join-Path $pendrive $sub) -Recurse -Force
     }
+    Copy-Item (Join-Path $origem 'MANUAL-TECNICO-TI.md') $pendrive -Force
     Write-Host "SUPER_PENDRIVER atualizado para a versão $versao."
 }
 Remove-Item $montagem -Recurse -Force
