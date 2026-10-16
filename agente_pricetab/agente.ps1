@@ -30,7 +30,7 @@ param([string]$Config = (Join-Path $PSScriptRoot 'config.json'), [switch]$Testar
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$versaoAgente = '2.4'
+$versaoAgente = '2.5'
 $noLinux = [bool]$IsLinux   # $IsLinux só existe no PowerShell 7 (no 5.1 do Windows é vazio = falso)
 
 $cfg = Get-Content $Config -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -99,7 +99,8 @@ function Hash-Sha256([byte[]]$bytes) {
 
 function Hash-Texto([string]$texto) { return Hash-Sha256 ([Text.Encoding]::UTF8.GetBytes($texto)) }
 
-$cabecalhos = @{ 'X-Chave-Loja' = $chave; 'X-Agente-Id' = (Id-Agente) }
+# X-Versao-Agente: o painel mostra a versão de cada loja e avisa quando há uma mais nova.
+$cabecalhos = @{ 'X-Chave-Loja' = $chave; 'X-Agente-Id' = (Id-Agente); 'X-Versao-Agente' = $versaoAgente }
 
 # Espera da próxima tentativa: cresce a cada falha e varia ±20% (várias lojas não tentam juntas).
 function Espera-Segundos([int]$falhas) {

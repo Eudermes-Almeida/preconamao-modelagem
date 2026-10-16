@@ -31,6 +31,20 @@ alimenta os terminais Gertec) e, quando o arquivo muda, envia uma cópia para o 
 
 Depois de formatar a máquina, basta repetir os passos acima.
 
+## Versão nova
+Não há atualização automática: cada versão nova é entregue pela Simplifica Compras num pacote
+`agente-simplifica-<versão>.zip`, com `NOVIDADES-<versão>.md` (o que mudou e se precisa
+reconfigurar) e `SHA256.txt` (resumo de cada arquivo). A TI revisa e instala quando decidir.
+
+1. Confira o pacote: `Get-FileHash agente-simplifica-<versão>.zip` tem de dar o mesmo SHA-256
+   informado pela Simplifica Compras por outro canal (ex.: no corpo do e-mail).
+2. Descompacte e, na pasta do agente da loja, clique com o botão direito em **`instalar.cmd`** →
+   "Executar como administrador".
+3. Escolha `1` (**ATUALIZAR só o programa**): o instalador copia o programa novo para a pasta
+   instalada, mantém a configuração (chave, senha e demais respostas) e reinicia o agente. No fim
+   aparece "Agente <versão> ... iniciado" e "Atualização concluída".
+4. A Simplifica Compras confere no painel que a loja passou para a versão nova.
+
 ## Remoção
 Clique com o botão direito em **desinstalar.cmd** → "Executar como administrador" e confirme com
 `s`: a tarefa agendada é parada e apagada, e a pasta do agente também é apagada, inclusive o

@@ -84,7 +84,12 @@ oferece:
   A configuração nova só substitui a atual **se o teste passar**: um dado errado não derruba o
   agente que já está rodando.
 
-Não há atualização automática: toda versão nova é entregue à TI e instalada por ela.
+Não há atualização automática: toda versão nova é entregue à TI e instalada por ela, num pacote
+`agente-simplifica-<versão>.zip` com `NOVIDADES-<versão>.md` (o que mudou e se precisa reconfigurar)
+e `SHA256.txt`. Antes de instalar, confira: `sha256sum agente-simplifica-<versão>.zip` tem de dar o
+SHA-256 informado pela Simplifica Compras por outro canal; depois de descompactar,
+`sha256sum -c SHA256.txt` confere cada arquivo. A Simplifica Compras confere no painel que a loja
+passou para a versão nova.
 
 ## 4. Segurança
 

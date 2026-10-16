@@ -34,6 +34,58 @@ Write-Host ''
 Write-Host '=== Simplifica Compras - instalação do agente do PRICETAB ===' -ForegroundColor Cyan
 Write-Host ''
 
+# Já instalado (a tarefa existe e a pasta dela tem config.json): oferece ATUALIZAR só o programa,
+# como o instalar.sh do Linux. A pasta instalada é a da tarefa: este instalador pode estar rodando
+# da pasta da versão nova (ex.: o pendrive) - aí o programa novo é copiado para a pasta instalada.
+$tarefaInstalada = Get-ScheduledTask -TaskName $nomeTarefa -ErrorAction SilentlyContinue
+$pastaInstalada = if ($tarefaInstalada) { $tarefaInstalada.Actions[0].WorkingDirectory } else { $null }
+if ($pastaInstalada -and (Test-Path (Join-Path $pastaInstalada 'config.json')) -and -not $SemPerguntas) {
+    function Versao-Agente([string]$arquivo) {
+        if ((Test-Path $arquivo) -and ((Get-Content $arquivo -Raw -Encoding UTF8) -match "\`$versaoAgente = '([^']+)'")) { return $Matches[1] }
+        return '?'
+    }
+    $versaoInstalada = Versao-Agente (Join-Path $pastaInstalada 'agente.ps1')
+    $versaoPacote = Versao-Agente (Join-Path $PSScriptRoot 'agente.ps1')
+    Write-Host "Este agente já está instalado em $pastaInstalada (versão $versaoInstalada; este pacote: versão $versaoPacote)."
+    Write-Host '  1 = ATUALIZAR só o programa (mantém a configuração: chave, senha e demais respostas)'
+    Write-Host '  2 = RECONFIGURAR (refaz as perguntas; Enter mantém cada valor atual)'
+    if ((Read-Host 'Escolha [1]') -ne '2') {
+        Stop-ScheduledTask -TaskName $nomeTarefa -ErrorAction SilentlyContinue
+        Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+            Where-Object { $_.CommandLine -like "*$pastaInstalada*agente.ps1*" } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        if ([IO.Path]::GetFullPath($pastaInstalada).TrimEnd('\') -ine [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')) {
+            # Só o programa: a configuração, o estado, a fila, a auditoria e os logs da loja ficam.
+            Get-ChildItem $PSScriptRoot -File | Where-Object { $_.Name -notin 'config.json', 'config.novo.json', 'estado.json' } |
+                Copy-Item -Destination $pastaInstalada -Force
+            Write-Host "Programa da versão $versaoPacote copiado para $pastaInstalada."
+        }
+        $inicio = Get-Date
+        Start-ScheduledTask -TaskName $nomeTarefa
+        Write-Host 'Agente reiniciado. Conferindo a versão no log (até 60 s)...'
+        $linha = $null
+        $fim = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $fim -and -not $linha) {
+            Start-Sleep -Seconds 3
+            $log = Get-ChildItem (Join-Path $pastaInstalada 'logs') -Filter 'agente-*.log' -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -ge $inicio } | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($log) { $linha = Get-Content $log.FullName -Encoding UTF8 -Tail 30 | Where-Object { $_ -match 'Agente \S+ \(modo .*iniciado' } | Select-Object -Last 1 }
+        }
+        if ($linha -match "Agente $([regex]::Escape($versaoPacote)) ") {
+            Write-Host "  $linha" -ForegroundColor Green
+            Write-Host "Atualização concluída: agente $versaoPacote rodando com a configuração de antes." -ForegroundColor Green
+        } elseif ($linha) {
+            Write-Host "  $linha" -ForegroundColor Yellow
+            Write-Host "O agente reiniciou, mas não na versão $versaoPacote. Confira se os arquivos foram copiados." -ForegroundColor Yellow
+        } else {
+            Write-Host "O agente não registrou a partida em 60 s. Log em: $(Join-Path $pastaInstalada 'logs')" -ForegroundColor Yellow
+        }
+        return
+    }
+    Write-Host ''
+}
+
+
 $base = if (Test-Path $caminhoConfig) { Get-Content $caminhoConfig -Raw -Encoding UTF8 | ConvertFrom-Json } else { Get-Content $caminhoModelo -Raw -Encoding UTF8 | ConvertFrom-Json }
 $config = [ordered]@{
     url                   = if ($Url) { $Url } else { Perguntar 'Endereço da API' $base.url }
